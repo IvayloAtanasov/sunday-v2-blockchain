@@ -13,10 +13,10 @@ contract DeployFundingVault is Script {
         vm.startBroadcast(deployer);
 
         uint256 assetTokenId = 1;
-        string memory tokenMetadataUri = "bafybeicu3zehhzozvamfx2b4a7kfgigtd7dgetzyh3a4eysiynnpxop6xq";
+        string memory tokenMetadataUri = "bafkreiebrb44gvbrxfvcsyjus2m27wyx5f225k6o6hxnjktdjxqqdcsjde";
 
         // create vault
-        address assetTokenAddress = 0x2aFa7663137618251C31cb58A72F3B0E2543A2e5; // SUN
+        address assetTokenAddress = 0xCA65a75b7475e32C6C4563D95328E75cEc6fB038; // SUN
         address borrowerAddress = 0xe64c80DaC84aeE6983C3a2945a84f757e98c6B40; // Deployer
         address collateralTokenAddress = 0x5E44db7996c682E92a960b65AC713a54AD815c6B; // EURC
         uint256 funding = 1_000_000; // 1 EURC
