@@ -24,10 +24,7 @@ contract ChainlinkYieldAdapter is FunctionsClient, ConfirmedOwner {
 
     event Response(bytes32 indexed requestId, bytes response, bytes err);
 
-    constructor(
-        address routerAddress,
-        address yieldTrackerAddress
-    ) FunctionsClient(routerAddress) ConfirmedOwner(msg.sender) { }
+    constructor(address routerAddress) FunctionsClient(routerAddress) ConfirmedOwner(msg.sender) { }
 
     /**
      * @notice Send a simple request
@@ -117,7 +114,7 @@ contract ChainlinkYieldAdapter is FunctionsClient, ConfirmedOwner {
         // usdc value delta int256 (32 bytes)
         // updatedAt uint64 (8 bytes)
 
-        // TODO: is all funding vaults are created by a factory we can make a sanity check for the address before trying to call rebase on it
+        // Note: if all funding vaults are created by a factory we can make a sanity check for the address before trying to call rebase on it
 
         (address fundingVaultAddress, int256 valueDelta, uint64 updatedAt) = abi.decode(s_lastResponse, (address, int256, uint64));
         IFundingVault(fundingVaultAddress).rebase(valueDelta, updatedAt);
