@@ -12,3 +12,9 @@ docs/
 
 # Dotenv file
 .env
+
+# Helper for deploy commands
+commands.sh
+
+# Deployment metadata
+broadcast

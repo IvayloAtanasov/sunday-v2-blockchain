@@ -2,10 +2,11 @@
 pragma solidity >=0.8.0;
 
 import { Owned } from "lib/solmate/src/auth/Owned.sol";
+import { ERC1155TokenReceiver } from "lib/solmate/src/tokens/ERC1155.sol";
 import { IERC20 } from "./interfaces/IERC20.sol";
 import { IERC1155 } from "./interfaces/IERC1155.sol";
 
-contract FundingVault is Owned {
+contract FundingVault is Owned, ERC1155TokenReceiver {
     // collateral token loan receiver
     address public borrower;
     // sun token

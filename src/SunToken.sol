@@ -74,12 +74,12 @@ contract SunToken is ERC1155, OwnerIsCreator {
     }
 
     function setURI(uint256 tokenId, string memory tokenUri) external onlyOwner {
-        tokenURIs[tokenId] = tokenUri;
+        _tokenURIs[tokenId] = tokenUri;
         emit URI(tokenUri, tokenId);
     }
 
     function uri(uint256 tokenId) public view override returns (string memory) {
         string memory tokenURI = _tokenURIs[tokenId];
-        return string(abi.encodePacked(baseURI, "/", tokenURI, ".json"));
+        return string(abi.encodePacked(baseURI, "/", tokenURI));
     }
 }
