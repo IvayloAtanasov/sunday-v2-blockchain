@@ -12,7 +12,7 @@ contract DeployChainlinkYieldAdapter is Script {
         uint256 deployer = vm.envUint("DEPLOYER_PRIVATE_KEY");
         vm.startBroadcast(deployer);
 
-        address fundingVaultAddress = 0xB31b14C2fDF48fdc4AC2dd0a6B7c37f972F96349; // Sun #1 funding vault
+        address fundingVaultAddress = 0x327f979eE1B25aA32f7Bb539E2351716e5556a1b; // Sun #1 funding vault
 
         // create adapter
         address routerAddress = 0xA9d587a00A31A52Ed70D6026794a8FC5E2F5dCb0; // Avalanche Fuji Chainlink router
