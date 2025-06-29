@@ -4,9 +4,6 @@ pragma solidity ^0.8.0;
 import { ERC1155 } from "lib/solmate/src/tokens/ERC1155.sol";
 import { OwnerIsCreator } from "lib/chainlink/contracts/src/v0.8/shared/access/OwnerIsCreator.sol";
 
-// TODO: CCIP support
-// https://github.com/smartcontractkit/ccip-starter-kit-foundry/blob/main/src/ProgrammableTokenTransfers.sol
-
 contract SunToken is ERC1155, OwnerIsCreator {
 
     /**
