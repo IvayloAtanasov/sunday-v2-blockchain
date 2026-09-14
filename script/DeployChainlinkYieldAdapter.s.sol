@@ -2,26 +2,27 @@
 pragma solidity ^0.8.20;
 
 import "lib/forge-std/src/Script.sol";
-import "../src/ChainlinkYieldAdapter.sol";
-import "../src/FundingVault.sol";
+import { ChainlinkYieldAdapter } from "../src/ChainlinkYieldAdapter.sol";
+import { LendingVault } from "../src/LendingVault.sol";
 
 contract DeployChainlinkYieldAdapter is Script {
-    function setUp() public {}
-
     function run() public {
         uint256 deployer = vm.envUint("DEPLOYER_PRIVATE_KEY");
+
+        address routerAddress = vm.envAddress("FUNCTIONS_ROUTER");
+        address vaultAddress = vm.envOr("LENDING_VAULT", address(0));
+
         vm.startBroadcast(deployer);
 
-        address fundingVaultAddress = 0x327f979eE1B25aA32f7Bb539E2351716e5556a1b; // Sun #1 funding vault
-
-        // create adapter
-        address routerAddress = 0xA9d587a00A31A52Ed70D6026794a8FC5E2F5dCb0; // Avalanche Fuji Chainlink router
         ChainlinkYieldAdapter adapter = new ChainlinkYieldAdapter(routerAddress);
 
-        // allow adapter to update funding vault yield
-        FundingVault fundingVault = FundingVault(fundingVaultAddress);
-        fundingVault.setRebaseAdapter(address(adapter));
+        // Only possible while the vault's funding window is still open (R-19)
+        if (vaultAddress != address(0)) {
+            LendingVault(vaultAddress).setRebaseAdapter(address(adapter));
+        }
 
         vm.stopBroadcast();
+
+        console.log("ChainlinkYieldAdapter:", address(adapter));
     }
 }

@@ -4,7 +4,7 @@ pragma solidity >=0.8.0;
 import { FunctionsClient } from "lib/chainlink-evm/contracts/src/v0.8/functions/v1_0_0/FunctionsClient.sol";
 import { ConfirmedOwner } from "lib/chainlink-evm/contracts/src/v0.8/shared/access/ConfirmedOwner.sol";
 import { FunctionsRequest } from "lib/chainlink-evm/contracts/src/v0.8/functions/v1_0_0/libraries/FunctionsRequest.sol";
-import { IFundingVault } from "./interfaces/IFundingVault.sol";
+import { ILendingVault } from "./interfaces/ILendingVault.sol";
 
 /**
  * Based on: https://docs.chain.link/chainlink-functions/tutorials/api-query-parameters#set-up-your-environment
@@ -110,14 +110,14 @@ contract ChainlinkYieldAdapter is FunctionsClient, ConfirmedOwner {
         s_lastError = err;
 
         // TODO: ideally only one ChainlinkYieldAdapter could work for all installations, if all params fit within response
-        // fundingValut address (20 bytes)
+        // lendingVault address (20 bytes)
         // usdc value delta int256 (32 bytes)
         // updatedAt uint64 (8 bytes)
 
-        // Note: if all funding vaults are created by a factory we can make a sanity check for the address before trying to call rebase on it
+        // Note: if all lending vaults are created by a factory we can make a sanity check for the address before trying to call rebase on it
 
-        (address fundingVaultAddress, int256 valueDelta, uint64 updatedAt) = abi.decode(s_lastResponse, (address, int256, uint64));
-        IFundingVault(fundingVaultAddress).rebase(valueDelta, updatedAt);
+        (address lendingVaultAddress, int256 valueDelta, uint64 updatedAt) = abi.decode(s_lastResponse, (address, int256, uint64));
+        ILendingVault(lendingVaultAddress).rebase(valueDelta, updatedAt);
 
         emit Response(requestId, s_lastResponse, s_lastError);
     }

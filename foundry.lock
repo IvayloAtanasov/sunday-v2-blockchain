@@ -1,0 +1,17 @@
+{
+  "lib/chainlink": {
+    "rev": "381285eba617615326ef28447fbfd8457ae3d14c"
+  },
+  "lib/chainlink-ccip": {
+    "rev": "45c8e9237804b06a4dbd338040569edb767bafd0"
+  },
+  "lib/chainlink-evm": {
+    "rev": "e479a8d409042f4843154ffb3c96260944201d5e"
+  },
+  "lib/forge-std": {
+    "rev": "77041d2ce690e692d6e03cc812b57d1ddaa4d505"
+  },
+  "lib/solmate": {
+    "rev": "c93f7716c9909175d45f6ef80a34a650e2d24e56"
+  }
+}
