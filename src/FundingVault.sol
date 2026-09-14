@@ -93,6 +93,8 @@ contract FundingVault is Owned, ERC1155TokenReceiver {
             redeemable -= absValueDelta;
         }
 
+        // TODO: no rebases should happen past a given point
+        // otherwise lenders have no incentive to burn the tokens, ever
         rebasedAt = updatedAt;
 
         emit Rebased(redeemable, valueDelta, rebasedAt);
@@ -122,6 +124,7 @@ contract FundingVault is Owned, ERC1155TokenReceiver {
     function redeem(uint256 amount) external {
         require(block.timestamp > maturity, "FUNDING_MATURITY_NOT_REACHED");
 
+        // TODO: only owner can burn atm
         assetToken.burn(msg.sender, assetTokenID, amount);
         uint256 redeemableForBurned = (amount * redeemable) / targetFunding;
 
