@@ -9,8 +9,8 @@ contract DeployChainlinkYieldAdapter is Script {
     function run() public {
         uint256 deployer = vm.envUint("DEPLOYER_PRIVATE_KEY");
 
-        address routerAddress = vm.envAddress("FUNCTIONS_ROUTER");
-        address vaultAddress = vm.envOr("LENDING_VAULT", address(0));
+        address routerAddress = vm.envAddress("FUNCTIONS_ROUTER_ADDRESS");
+        address vaultAddress = vm.envOr("LENDING_VAULT_ADDRESS", address(0));
 
         vm.startBroadcast(deployer);
 

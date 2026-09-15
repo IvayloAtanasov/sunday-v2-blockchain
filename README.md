@@ -65,8 +65,8 @@ $ ./deploy.sh arc DeploySunToken --broadcast --verify
 Scripts:
 
 -   `DeploySunToken`: deploys the SunToken collection. Needs `DEPLOYER_PRIVATE_KEY`.
--   `DeployLendingVault`: deploys a lending vault and binds it to its claim token id. Deploys a new SunToken unless `SUN_TOKEN` is set.
--   `DeployChainlinkYieldAdapter`: deploys the adapter and, if `LENDING_VAULT` is set, wires it to that vault (only while funding is open).
+-   `DeployLendingVault`: deploys a lending vault and binds it to its claim token id. Deploys a new SunToken unless `SUN_TOKEN_ADDRESS` is set.
+-   `DeployChainlinkYieldAdapter`: deploys the adapter and, if `LENDING_VAULT_ADDRESS` is set, wires it to that vault (only while funding is open).
 
 See the `.env.*.example` files for all variables and defaults.
 
