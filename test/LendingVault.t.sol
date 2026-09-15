@@ -595,6 +595,98 @@ contract LendingVaultTest is Test {
         assertEq(eurc.balanceOf(client) - before, 500e6);
     }
 
+    /// R-36: stray EURC is not repayment; the client gets it back only once every claim is gone.
+    function test_remainder_strayEurcGoesToClientAfterAllRedeemed() public {
+        _toAccruing();
+
+        vm.warp(vault.maturity() + 1);
+        uint256 owed = vault.owed();
+        _repay(owed);
+
+        vm.prank(bob);
+        eurc.transfer(address(vault), 123e6);
+
+        vault.finalize();
+        assertEq(vault.settled(), owed, "gift not counted as repayment");
+
+        vm.prank(alice);
+        vault.redeem(PRINCIPAL / 2);
+
+        vm.prank(client);
+        vm.expectRevert(LendingVault.ClaimsOutstanding.selector);
+        vault.withdrawRemainder();
+
+        vm.prank(bob);
+        vault.redeem(PRINCIPAL / 2);
+
+        vm.prank(alice);
+        vm.expectRevert(LendingVault.NotClient.selector);
+        vault.withdrawRemainder();
+
+        uint256 before = eurc.balanceOf(client);
+        vm.prank(client);
+        vault.withdrawRemainder();
+
+        assertEq(eurc.balanceOf(client) - before, 123e6);
+        assertEq(eurc.balanceOf(address(vault)), 0);
+    }
+
+    function test_remainder_includesUnwithdrawnSurplus() public {
+        _toAccruing();
+
+        vm.warp(vault.maturity() + 1);
+        _repay(vault.owed() + 500e6);
+        vault.finalize();
+
+        vm.prank(alice);
+        vault.redeem(PRINCIPAL / 2);
+        vm.prank(bob);
+        vault.redeem(PRINCIPAL / 2);
+
+        vm.prank(client);
+        vault.withdrawRemainder();
+
+        assertEq(vault.surplus(), 0);
+        assertEq(eurc.balanceOf(address(vault)), 0);
+
+        vm.prank(client);
+        vm.expectRevert(LendingVault.ZeroAmount.selector);
+        vault.withdrawSurplus();
+    }
+
+    function test_remainder_afterFailedRaiseOnceAllRefunded() public {
+        _subscribe(alice, PRINCIPAL / 2);
+
+        vm.prank(bob);
+        eurc.transfer(address(vault), 7e6);
+
+        vm.warp(vault.fundingDeadline());
+
+        vm.prank(client);
+        vm.expectRevert(LendingVault.ClaimsOutstanding.selector);
+        vault.withdrawRemainder();
+
+        vm.prank(alice);
+        vault.refund(PRINCIPAL / 2);
+
+        vm.prank(client);
+        vault.withdrawRemainder();
+
+        assertEq(eurc.balanceOf(address(vault)), 0);
+    }
+
+    function test_remainder_notBeforeTerminalPhase() public {
+        _subscribe(alice, PRINCIPAL / 2);
+
+        vm.prank(client);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                LendingVault.WrongPhase.selector, LendingVault.Phase.Redemption, LendingVault.Phase.Funding
+            )
+        );
+        vault.withdrawRemainder();
+    }
+
     /// R-19: the source of truth for the debt cannot change after lenders commit.
     function test_rebaseAdapter_frozenAfterFundingCloses() public {
         _subscribe(alice, PRINCIPAL);

@@ -76,28 +76,32 @@ vault therefore never holds unsold claims, and outstanding supply at funding clo
      v                                   v                         v
   Failed                              Default <───── grace ────  Settlement
      │                                   │                         │
-     │ refund 1:1                        │ redeem vs. balance      │ finalize
+     │ refund 1:1                        │ finalize                │ finalize
      v                                   v                         v
-  (terminal)                         (terminal)                Redemption
+  (terminal)                         Redemption <──────────────────┘
+                                     (terminal)
 ```
+
+Funding close, Failed and Default are derived from deadlines in `phase()`; nobody calls a function
+to enter them.
 
 **4.1 Funding.** Entry: construction. Callable: `subscribe()`. Not callable: `rebase()`, `drawdown()`, `repay()`, `redeem()`. Exits on `subscribed == principal` → **Drawdown**, or on `fundingDeadline` with `subscribed < principal` → **Failed**.
 
 **4.1.1 — R-33.** Partial fills are not accepted. A raise fills exactly or goes to Failed.
 
-**4.2 Failed.** Terminal. Callable: `refund()` — burn claim tokens, receive EURC 1:1. No premium, no loss. Nothing else is ever callable.
+**4.2 Failed.** Terminal. Callable: `refund()` — burn claim tokens, receive EURC 1:1. No premium, no loss. Once all claims are refunded, `withdrawRemainder()` (R-36); nothing else.
 
 **4.3 Drawdown.** Entry: funding target met. Callable: `drawdown()` (client, once, capped), `activate()`. Not callable: `rebase()`, `redeem()`. The asset does not exist yet, so no premium can accrue. Exits on `activate()` → **Accruing**, or on `activationDeadline` → **Default**.
 
 **4.3.1 — R-35.** `activate()` MUST require that `drawdown()` has happened. `drawdown()` is only callable in Drawdown, so activating first would lock the client out of the principal while the term starts and the obligation accrues against them.
 
-**4.4 Accruing.** Entry: `activate()`, which sets `maturity = block.timestamp + term`. Callable: `rebase()`, `repay()`. Not callable: `subscribe()`, `drawdown()`, `redeem()`. Exits on `maturity` → **Settlement**.
+**4.4 Accruing.** Entry: `activate()`, which sets `maturity = block.timestamp + term`. Callable: `rebase()`, `repay()`, and `finalize()` once `repaid >= owed` (R-16). Not callable: `subscribe()`, `drawdown()`, `redeem()`. Exits on `maturity` → **Settlement**, or early `finalize()` → **Redemption**.
 
-**4.5 Settlement.** Entry: `maturity` reached. `owed` is frozen. Callable: `repay()` only. This is the grace window in which the client's bullet payment must land. Exits on `finalize()` → **Redemption**, or on `maturity + grace` with `repaid < owed` → **Default**.
+**4.5 Settlement.** Entry: `maturity` reached. `owed` is frozen. Callable: `repay()`, `finalize()`. This is the grace window in which the client's bullet payment must land. Exits on `finalize()` → **Redemption**, or on `maturity + grace` with `repaid < owed` → **Default**.
 
-**4.6 Redemption.** Entry: `finalize()`, which fixes `settled`. Callable: `redeem()`. Terminal.
+**4.6 Redemption.** Entry: `finalize()`, which fixes `settled`, from Accruing, Settlement or Default. Callable: `redeem()`, `withdrawSurplus()`, `withdrawRemainder()`. Terminal. Whether the loan defaulted is recorded in `defaulted`, not in the phase.
 
-**4.7 Default.** Entry: activation deadline missed, or grace expired with `repaid < owed`. A declared, publicly readable state — the on-chain record that off-chain recourse rests on. `owed` freezes at its current value; `finalize()` runs against whatever balance exists (possibly zero) and `redeem()` opens. Terminal.
+**4.7 Default.** Entry: activation deadline missed, or grace expired with `repaid < owed`. A declared, publicly readable state — the on-chain record that off-chain recourse rests on. `owed` freezes at its current value. Callable: `repay()`, `finalize()`. `finalize()` runs against whatever balance exists (possibly zero), sets `defaulted`, and exits → **Redemption**.
 
 **4.8 — R-6.** Every state transition MUST emit an event carrying the new state and the values frozen at that point (`owed`, `maturity`, `settled` as applicable).
 
@@ -162,9 +166,10 @@ Clamping per-rebase would forgive a bad period permanently, letting later profit
 the floor. Accumulating signed and flooring once lets a weak period offset later profit, while
 principal stays protected.
 
-**5.5 — R-12.** `drawdown()` MUST be capped at `principal` and callable exactly once. It MUST NOT
-read `balanceOf(address(this))`. Repaid EURC and subscribed EURC sit in the same balance, so a
-balance-sweeping withdrawal would let the client reclaim their own repayment.
+**5.5 — R-12.** `drawdown()` MUST transfer exactly `principal` and be callable exactly once. It
+MUST NOT derive the amount from `balanceOf(address(this))`. The client receives exactly what was
+raised, no more and no less, so the transfer is fully determined by the contract's own rules rather
+than by whatever the balance happens to hold.
 
 **5.6 — R-13.** Solvency MUST be readable at any block as `owed - repaid`, and exposed as a view.
 
@@ -197,9 +202,16 @@ settled = owed < repaid ? owed : repaid;   // uint256, EURC minor units
 **6.4.1 — R-30.** No scaled per-token rate. Multiply first, divide once. 1 claim token = 1 EURC
 minor unit (R-2), so both sides are in the same units.
 
-**6.4.2 — R-31.** Division rounds down. Dust stays in the vault; the last redeemer is never short.
+**6.4.2 — R-31.** Division rounds down. Dust stays in the vault until R-36; the last redeemer is never short.
 
 **6.4.3 — R-32.** Surplus (`repaid - owed`) is refundable to the client, not payable to lenders.
+
+**6.4.4 — R-36.** EURC sent to the vault other than through `subscribe()` or `repay()` MUST NOT be
+counted as subscription or repayment, and MUST NOT change `settled`. It is treated as a gift to the
+client. Once the vault is terminal (Redemption or Failed) and the claim token supply for `tokenId`
+is zero — every lender has redeemed or been refunded — the client MAY withdraw the vault's entire
+remaining EURC balance: stray transfers, redemption dust, and any unwithdrawn surplus. While any
+claim token is outstanding this path is closed, so it can never compete with a lender.
 
 **6.5 — R-16.** `finalize()` MUST be callable by anyone once the grace window has closed, and MUST
 be callable early by anyone once `repaid >= owed` (full repayment needs no waiting).
@@ -216,15 +228,15 @@ Names are indicative; the phase gating and the argument/cap semantics are the no
 | Function | Caller | Phase | Notes |
 |---|---|---|---|
 | `subscribe(amount)` | anyone | Funding | Pulls EURC, mints claim tokens 1:1. Reverts past the target (R-17). |
-| `closeFunding()` | anyone | Funding | At target or past deadline. Routes to Drawdown or Failed. |
 | `refund(n)` | holder | Failed | Burn n tokens, receive n EURC. |
 | `drawdown()` | client | Drawdown | Once, capped at `principal` (R-12). |
 | `activate()` | see §10.1 | Drawdown | Requires prior `drawdown()` (R-35). Sets `maturity = now + term`. Once. |
 | `rebase(delta, updatedAt)` | adapter | Accruing | Accumulates into `cumulativeYield`. Bounded by §8. |
 | `repay(amount)` | anyone | Accruing, Settlement, Default | Pulls EURC, increments `repaid`. Prepayment allowed (R-18). |
-| `finalize()` | anyone | Settlement, Default | Fixes `settled` (R-15, R-16). |
+| `finalize()` | anyone | Accruing (fully repaid), Settlement, Default | Fixes `settled`, sets `defaulted`, moves to Redemption (R-15, R-16). |
 | `redeem(n)` | holder | Redemption | Burns n tokens, pays `(n * settled) / principal`. |
-| `declareDefault()` | anyone | Drawdown, Settlement | Only when a deadline has actually passed. |
+| `withdrawSurplus()` | client | Redemption | Pays `surplus` (R-32). |
+| `withdrawRemainder()` | client | Redemption, Failed | Only at zero claim supply. Pays the whole remaining balance (R-36). |
 | `setRebaseAdapter(a)` | Operator | Funding only | Frozen once funding closes (R-19). |
 
 **7.1 — R-17.** `subscribe()` MUST reject any amount that would push `subscribed` past `principal`,
@@ -233,7 +245,7 @@ partial fills at the boundary must be explicit.
 
 **7.2 — R-18.** `repay()` MUST accept partial prepayment during Accruing. It costs nothing to allow,
 lets a client de-risk their own default, and shrinks the payment that must land in a single block.
-Prepayment MUST NOT unlock early redemption and MUST NOT be withdrawable (R-12).
+Prepayment MUST NOT unlock early redemption and MUST NOT be withdrawable.
 
 **7.3 — R-19.** The rebase adapter address MUST be frozen when funding closes. After lenders have
 committed capital, no party should be able to swap out the source of truth for what is owed to them.
@@ -299,10 +311,12 @@ no claim tokens of its own (R-11).
 **I-6** `drawdown()` succeeds at most once, and transfers exactly `principal`.
 **I-7** Sum of all EURC paid out by `redeem()` never exceeds `settled`.
 **I-8** `settled` is zero before `finalize()` and immutable after.
-**I-9** No function moves EURC out of the vault except `drawdown()`, `redeem()` and `refund()`.
+**I-9** No function moves EURC out of the vault except `drawdown()`, `refund()`, `redeem()`,
+`withdrawSurplus()` and `withdrawRemainder()`; the last only at zero claim supply (R-36).
 **I-10** In Failed, EURC out == EURC in, and no premium is ever payable.
 **I-11** Every EURC balance increase is attributable to `subscribe()` or `repay()`; a bare transfer
-to the vault address increases neither `subscribed` nor `repaid` and is not claimable.
+to the vault address increases neither `subscribed` nor `repaid`, is not claimable by lenders, and
+is withdrawable by the client only under R-36.
 **I-12** `term` never changes; `maturity == activatedAt + term` (R-29).
 **I-13** Sum of all `redeem()` payouts ≤ `settled`, with truncation dust retained (R-31).
 

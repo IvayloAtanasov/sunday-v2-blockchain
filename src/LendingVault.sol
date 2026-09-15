@@ -140,6 +140,7 @@ contract LendingVault is Owned, ReentrancyGuard {
     event Finalized(uint256 owed, uint256 repaidTotal, uint256 settled, bool defaulted);
     event Redeemed(address indexed lender, uint256 burned, uint256 received);
     event SurplusWithdrawn(address indexed to, uint256 amount);
+    event RemainderWithdrawn(address indexed to, uint256 amount);
     event RebaseAdapterChanged(address oldAdapter, address newAdapter);
 
     /*//////////////////////////////////////////////////////////////
@@ -164,6 +165,7 @@ contract LendingVault is Owned, ReentrancyGuard {
     error StaleUpdate();
     error DeltaOutOfBounds();
     error InvalidConfig();
+    error ClaimsOutstanding();
 
     /*//////////////////////////////////////////////////////////////
                               CONSTRUCTOR
@@ -304,8 +306,8 @@ contract LendingVault is Owned, ReentrancyGuard {
     //////////////////////////////////////////////////////////////*/
 
     /**
-     * Client takes the principal to build the asset. Once, capped, and never reading the
-     * balance — repayments share this balance and must not be reclaimable (R-12).
+     * Client takes the principal to build the asset. Once, and exactly `principal`, never
+     * whatever the balance happens to be (R-12).
      */
     function drawdown() external nonReentrant {
         _require(Phase.Drawdown);
@@ -454,6 +456,27 @@ contract LendingVault is Owned, ReentrancyGuard {
         collateralToken.safeTransfer(client, amount);
 
         emit SurplusWithdrawn(client, amount);
+    }
+
+    /**
+     * Hand the client whatever EURC is left once every claim is gone: unwithdrawn surplus,
+     * redemption dust, and EURC sent to the vault without subscribe() or repay(). Stray EURC
+     * is never counted as repayment; lenders' claims are fully paid out before it moves (R-36).
+     */
+    function withdrawRemainder() external nonReentrant {
+        Phase p = phase();
+        if (p != Phase.Redemption && p != Phase.Failed) revert WrongPhase(Phase.Redemption, p);
+        if (msg.sender != client) revert NotClient();
+        if (claimToken.totalSupply(tokenId) != 0) revert ClaimsOutstanding();
+
+        uint256 amount = collateralToken.balanceOf(address(this));
+        if (amount == 0) revert ZeroAmount();
+
+        surplus = 0;
+
+        collateralToken.safeTransfer(client, amount);
+
+        emit RemainderWithdrawn(client, amount);
     }
 
     /*//////////////////////////////////////////////////////////////
