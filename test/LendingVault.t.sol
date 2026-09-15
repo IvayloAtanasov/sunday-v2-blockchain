@@ -61,7 +61,7 @@ contract LendingVaultTest is Test {
         vault = new LendingVault(c, operator);
 
         vm.startPrank(operator);
-        claim.setIssuer(TOKEN_ID, address(vault), "vault-1.json");
+        assertEq(claim.createToken(address(vault)), TOKEN_ID);
         vault.setRebaseAdapter(adapter);
         vm.stopPrank();
 
@@ -711,9 +711,15 @@ contract LendingVaultTest is Test {
 
     /// R-3: one collection serves many vaults; an id belongs to exactly one issuer, forever.
     function test_claimToken_issuerIsPerIdAndNotReassignable() public {
+        vm.expectEmit(address(claim));
+        emit SunToken.TokenCreated(TOKEN_ID + 1, address(0xBAD));
+
         vm.prank(operator);
-        vm.expectRevert(SunToken.AlreadyIssued.selector);
-        claim.setIssuer(TOKEN_ID, address(0xBAD), "x");
+        uint256 id = claim.createToken(address(0xBAD));
+
+        assertEq(id, TOKEN_ID + 1, "a new binding gets the next id");
+        assertEq(claim.nextTokenId(), TOKEN_ID + 2);
+        assertEq(claim.issuerOf(TOKEN_ID), address(vault), "existing binding untouched");
 
         vm.prank(address(0xBAD));
         vm.expectRevert(SunToken.NotIssuer.selector);
@@ -738,7 +744,7 @@ contract LendingVaultTest is Test {
         LendingVault second = new LendingVault(c, operator);
 
         vm.prank(operator);
-        claim.setIssuer(2, address(second), "vault-2.json");
+        assertEq(claim.createToken(address(second)), 2);
 
         _subscribe(alice, PRINCIPAL);
         vm.startPrank(alice);

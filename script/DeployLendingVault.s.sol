@@ -11,7 +11,11 @@ import { SunToken } from "../src/SunToken.sol";
  * The SunToken collection is deployed once and reused: set SUN_TOKEN_ADDRESS to an existing
  * collection to add a vault to it.
  *
- * Order matters — setIssuer must land before funding opens, or subscribe() cannot mint.
+ * The token id is assigned by SunToken, not configured: the script reads nextTokenId() and builds
+ * the vault for it, then createToken() binds that same id. Deploy vaults one at a time from one
+ * operator, or the id can be taken in between.
+ *
+ * Order matters — createToken must land before funding opens, or subscribe() cannot mint.
  */
 contract DeployLendingVault is Script {
     function run() public {
@@ -21,7 +25,6 @@ contract DeployLendingVault is Script {
         address collateralToken = vm.envAddress("COLLATERAL_TOKEN_ADDRESS"); // EURC
         address borrower = vm.envAddress("BORROWER_ADDRESS");
         address activator = vm.envOr("ACTIVATOR_ADDRESS", operator);
-        uint256 tokenId = vm.envUint("TOKEN_ID");
         uint256 principal = vm.envUint("PRINCIPAL");
         string memory tokenUri = vm.envString("TOKEN_URI");
 
@@ -35,6 +38,7 @@ contract DeployLendingVault is Script {
         vm.startBroadcast(deployer);
 
         SunToken claimToken = SunToken(vm.envAddress("SUN_TOKEN_ADDRESS"));
+        uint256 tokenId = claimToken.nextTokenId();
 
         LendingVault vault = new LendingVault(
             LendingVault.Config({
@@ -54,7 +58,8 @@ contract DeployLendingVault is Script {
             operator
         );
 
-        claimToken.setIssuer(tokenId, address(vault), tokenUri);
+        require(claimToken.createToken(address(vault)) == tokenId, "token id taken during deployment");
+        claimToken.setURI(tokenId, tokenUri);
 
         // Adapter is settable only while funding is open (R-19)
         address adapter = vm.envOr("REBASE_ADAPTER_ADDRESS", address(0));
