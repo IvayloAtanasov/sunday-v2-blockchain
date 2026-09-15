@@ -45,13 +45,15 @@ contract LendingVault is Owned, ReentrancyGuard {
         uint256 term;
         uint256 activationWindow;
         uint256 graceWindow;
-        uint256 maxDeltaPerPeriod;
+        uint256 maxRebaseDeltaRatio;
         uint256 maxStaleness;
     }
 
     /*//////////////////////////////////////////////////////////////
                               PARAMETERS
     //////////////////////////////////////////////////////////////*/
+
+    uint256 internal constant BPS = 10_000;
 
     /// Address that draws the principal down and owes repayment
     address public immutable client;
@@ -80,7 +82,8 @@ contract LendingVault is Owned, ReentrancyGuard {
 
     uint256 public immutable graceWindow;
 
-    uint256 public immutable maxDeltaPerPeriod;
+    /// Max |delta| a single rebase may apply, relative to principal, in bps (R-26)
+    uint256 public immutable maxRebaseDeltaRatio;
 
     uint256 public immutable maxStaleness;
 
@@ -150,6 +153,7 @@ contract LendingVault is Owned, ReentrancyGuard {
     error NotActivator();
     error NotAdapter();
     error AlreadyDrawnDown();
+    error NotDrawnDown();
     error AlreadyActivated();
     error AlreadyFinalized();
     error NotFinalizable();
@@ -170,6 +174,7 @@ contract LendingVault is Owned, ReentrancyGuard {
             c.principal == 0 || c.term == 0 || c.fundingWindow == 0 || c.activationWindow == 0
                 || c.client == address(0) || c.activator == address(0) || c.claimToken == address(0)
                 || c.collateralToken == address(0)
+                || c.maxRebaseDeltaRatio == 0 || c.maxRebaseDeltaRatio > BPS
         ) revert InvalidConfig();
 
         client = c.client;
@@ -183,7 +188,7 @@ contract LendingVault is Owned, ReentrancyGuard {
         term = c.term;
         activationWindow = c.activationWindow;
         graceWindow = c.graceWindow;
-        maxDeltaPerPeriod = c.maxDeltaPerPeriod;
+        maxRebaseDeltaRatio = c.maxRebaseDeltaRatio;
         maxStaleness = c.maxStaleness;
 
         _storedPhase = Phase.Funding;
@@ -322,6 +327,7 @@ contract LendingVault is Owned, ReentrancyGuard {
         _require(Phase.Drawdown);
         if (msg.sender != activator) revert NotActivator();
         if (maturity != 0) revert AlreadyActivated();
+        if (!drawnDown) revert NotDrawnDown();
 
         activatedAt = block.timestamp;
         maturity = block.timestamp + term;
@@ -352,7 +358,7 @@ contract LendingVault is Owned, ReentrancyGuard {
         if (updatedAt > block.timestamp) revert PeriodInFuture();
         if (block.timestamp - updatedAt > maxStaleness) revert StaleUpdate();
 
-        int256 bound = int256(maxDeltaPerPeriod);
+        int256 bound = int256(principal * maxRebaseDeltaRatio / BPS);
         if (delta > bound || delta < -bound) revert DeltaOutOfBounds();
 
         cumulativeYield += delta;

@@ -29,7 +29,7 @@ contract DeployLendingVault is Script {
         uint256 term = vm.envOr("TERM", uint256(5 * 365 days));
         uint256 activationWindow = vm.envOr("ACTIVATION_WINDOW", uint256(180 days));
         uint256 graceWindow = vm.envOr("GRACE_WINDOW", uint256(30 days));
-        uint256 maxDeltaPerPeriod = vm.envOr("MAX_DELTA_PER_PERIOD", uint256(100e6));
+        uint256 maxRebaseDeltaRatio = vm.envOr("MAX_REBASE_DELTA_RATIO", uint256(1_000)); // 10% of principal per rebase
         uint256 maxStaleness = vm.envOr("MAX_STALENESS", uint256(7 days));
 
         vm.startBroadcast(deployer);
@@ -52,7 +52,7 @@ contract DeployLendingVault is Script {
                 term: term,
                 activationWindow: activationWindow,
                 graceWindow: graceWindow,
-                maxDeltaPerPeriod: maxDeltaPerPeriod,
+                maxRebaseDeltaRatio: maxRebaseDeltaRatio,
                 maxStaleness: maxStaleness
             }),
             operator

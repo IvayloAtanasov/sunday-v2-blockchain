@@ -30,7 +30,8 @@ contract LendingVaultTest is Test {
     uint256 constant TERM = 365 days;
     uint256 constant ACTIVATION_WINDOW = 90 days;
     uint256 constant GRACE = 14 days;
-    uint256 constant MAX_DELTA = 100e6;
+    uint256 constant MAX_REBASE_DELTA_RATIO = 1_000; // 10% of principal
+    uint256 constant MAX_DELTA = PRINCIPAL * MAX_REBASE_DELTA_RATIO / 10_000;
     uint256 constant MAX_STALENESS = 7 days;
 
     function setUp() public {
@@ -53,7 +54,7 @@ contract LendingVaultTest is Test {
             term: TERM,
             activationWindow: ACTIVATION_WINDOW,
             graceWindow: GRACE,
-            maxDeltaPerPeriod: MAX_DELTA,
+            maxRebaseDeltaRatio: MAX_REBASE_DELTA_RATIO,
             maxStaleness: MAX_STALENESS
         });
 
@@ -285,6 +286,9 @@ contract LendingVaultTest is Test {
     function test_term_lengthIsFixed_startFloats() public {
         _subscribe(alice, PRINCIPAL);
 
+        vm.prank(client);
+        vault.drawdown();
+
         vm.warp(block.timestamp + 60 days); // slow build
 
         vm.prank(activator);
@@ -298,6 +302,9 @@ contract LendingVaultTest is Test {
         _subscribe(alice, PRINCIPAL);
 
         vm.prank(client);
+        vault.drawdown();
+
+        vm.prank(client);
         vm.expectRevert(LendingVault.NotActivator.selector);
         vault.activate();
 
@@ -307,6 +314,23 @@ contract LendingVaultTest is Test {
         vm.prank(activator);
         vm.expectRevert();
         vault.activate();
+    }
+
+    /// R-35: activating before drawdown would lock the client out of the principal they owe.
+    function test_activate_requiresDrawdown() public {
+        _subscribe(alice, PRINCIPAL);
+
+        vm.prank(activator);
+        vm.expectRevert(LendingVault.NotDrawnDown.selector);
+        vault.activate();
+
+        vm.prank(client);
+        vault.drawdown();
+
+        vm.prank(activator);
+        vault.activate();
+
+        assertEq(uint256(vault.phase()), uint256(LendingVault.Phase.Accruing));
     }
 
     /// R-28: never activating must not leave the vault inert forever with the money gone.
@@ -381,6 +405,43 @@ contract LendingVaultTest is Test {
         vm.expectRevert(LendingVault.DeltaOutOfBounds.selector);
         vm.prank(adapter);
         vault.rebase(-int256(MAX_DELTA + 1), uint64(at));
+    }
+
+    /// R-26: the bound is relative to principal, and exactly the bound is accepted.
+    function test_rebase_boundIsRelativeToPrincipal() public {
+        _toAccruing();
+
+        uint256 at = vault.activatedAt() + 30 days;
+        vm.warp(at + 1 days);
+
+        vm.prank(adapter);
+        vault.rebase(int256(MAX_DELTA), uint64(at));
+
+        assertEq(vault.owed(), PRINCIPAL + PRINCIPAL / 10);
+    }
+
+    function test_constructor_rejectsInvalidRebaseDeltaRatio() public {
+        LendingVault.Config memory c = LendingVault.Config({
+            client: client,
+            activator: activator,
+            claimToken: address(claim),
+            tokenId: 2,
+            collateralToken: address(eurc),
+            principal: PRINCIPAL,
+            fundingWindow: FUNDING_WINDOW,
+            term: TERM,
+            activationWindow: ACTIVATION_WINDOW,
+            graceWindow: GRACE,
+            maxRebaseDeltaRatio: 0,
+            maxStaleness: MAX_STALENESS
+        });
+
+        vm.expectRevert(LendingVault.InvalidConfig.selector);
+        new LendingVault(c, operator);
+
+        c.maxRebaseDeltaRatio = 10_001;
+        vm.expectRevert(LendingVault.InvalidConfig.selector);
+        new LendingVault(c, operator);
     }
 
     function test_rebase_rejectsStaleUpdate() public {
@@ -579,7 +640,7 @@ contract LendingVaultTest is Test {
             term: TERM,
             activationWindow: ACTIVATION_WINDOW,
             graceWindow: GRACE,
-            maxDeltaPerPeriod: MAX_DELTA,
+            maxRebaseDeltaRatio: MAX_REBASE_DELTA_RATIO,
             maxStaleness: MAX_STALENESS
         });
         LendingVault second = new LendingVault(c, operator);

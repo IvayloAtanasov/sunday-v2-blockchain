@@ -89,6 +89,8 @@ vault therefore never holds unsold claims, and outstanding supply at funding clo
 
 **4.3 Drawdown.** Entry: funding target met. Callable: `drawdown()` (client, once, capped), `activate()`. Not callable: `rebase()`, `redeem()`. The asset does not exist yet, so no premium can accrue. Exits on `activate()` → **Accruing**, or on `activationDeadline` → **Default**.
 
+**4.3.1 — R-35.** `activate()` MUST require that `drawdown()` has happened. `drawdown()` is only callable in Drawdown, so activating first would lock the client out of the principal while the term starts and the obligation accrues against them.
+
 **4.4 Accruing.** Entry: `activate()`, which sets `maturity = block.timestamp + term`. Callable: `rebase()`, `repay()`. Not callable: `subscribe()`, `drawdown()`, `redeem()`. Exits on `maturity` → **Settlement**.
 
 **4.5 Settlement.** Entry: `maturity` reached. `owed` is frozen. Callable: `repay()` only. This is the grace window in which the client's bullet payment must land. Exits on `finalize()` → **Redemption**, or on `maturity + grace` with `repaid < owed` → **Default**.
@@ -118,7 +120,7 @@ except the rebase adapter, which freezes when funding closes (R-19).
 | `term` | **Duration** of the financed period. Starts at `activate()`, not at deployment (R-29) |
 | `activationWindow` | Maximum delay from funding close to `activate()` (R-28) |
 | `graceWindow` | Duration from maturity to default ([§4.5](#4-lifecycle)) |
-| `maxDeltaPerPeriod`, `maxStaleness` | Rebase bounds (R-26, R-27) |
+| `maxRebaseDeltaRatio`, `maxStaleness` | Rebase bounds (R-26, R-27) |
 | `rebaseAdapter` | Settable during Funding only (R-19) |
 
 **5.1.1 — R-29.** `term` is a **duration**, fixed at construction, and MUST NOT be settable
@@ -217,7 +219,7 @@ Names are indicative; the phase gating and the argument/cap semantics are the no
 | `closeFunding()` | anyone | Funding | At target or past deadline. Routes to Drawdown or Failed. |
 | `refund(n)` | holder | Failed | Burn n tokens, receive n EURC. |
 | `drawdown()` | client | Drawdown | Once, capped at `principal` (R-12). |
-| `activate()` | see §10.1 | Drawdown | Sets `maturity = now + term`. Once. |
+| `activate()` | see §10.1 | Drawdown | Requires prior `drawdown()` (R-35). Sets `maturity = now + term`. Once. |
 | `rebase(delta, updatedAt)` | adapter | Accruing | Accumulates into `cumulativeYield`. Bounded by §8. |
 | `repay(amount)` | anyone | Accruing, Settlement, Default | Pulls EURC, increments `repaid`. Prepayment allowed (R-18). |
 | `finalize()` | anyone | Settlement, Default | Fixes `settled` (R-15, R-16). |
@@ -266,7 +268,11 @@ MUST NOT live only in the off-chain syncer: the contract cannot depend on the ba
 to stay solvent.
 
 **8.4 — R-26.** `rebase()` MUST bound `|delta|` per period against a configured maximum, so a
-mis-scaled or corrupted oracle response cannot move the obligation arbitrarily.
+mis-scaled or corrupted oracle response cannot move the obligation arbitrarily. The maximum is
+`maxRebaseDeltaRatio`: the largest delta a single rebase may apply, relative to `principal`, in
+basis points (1–10 000). Expressing it against principal makes it scale with installation size;
+the ratio itself is chosen per vault for its asset class and reporting cadence. The bound is per
+call, not per unit of time, so the same ratio is looser the more often the oracle reports.
 
 **8.5 — R-27.** `rebase()` MUST reject a stale `updatedAt` beyond a configured window.
 
