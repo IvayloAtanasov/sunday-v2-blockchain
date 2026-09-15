@@ -57,9 +57,9 @@ $ cp .env.arc.example .env.arc
 Then deploy with `./deploy.sh <network> <Script> [forge args]`, which loads `.env.<network>` and runs `script/<Script>.s.sol`:
 
 ```shell
-$ ./deploy.sh arc-testnet DeployLendingVault               # simulate
-$ ./deploy.sh arc-testnet DeployLendingVault --broadcast   # send transactions
-$ ./deploy.sh arc DeploySunToken --broadcast --verify
+$ ./deploy.sh arc-testnet DeployLendingVault                        # simulate
+$ ./deploy.sh arc-testnet DeployLendingVault --broadcast            # send transactions
+$ ./deploy.sh arc-testnet DeployLendingVault --broadcast --verify   # send transactions and verify on Arcscan
 ```
 
 Scripts:
