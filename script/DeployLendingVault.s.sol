@@ -9,7 +9,7 @@ import { SunToken } from "../src/SunToken.sol";
  * Deploys one lending vault and binds it to its claim token id.
  *
  * The SunToken collection is deployed once and reused: set SUN_TOKEN_ADDRESS to an existing
- * collection to add a vault to it, or leave it unset to deploy a fresh one.
+ * collection to add a vault to it.
  *
  * Order matters — setIssuer must land before funding opens, or subscribe() cannot mint.
  */
@@ -34,11 +34,7 @@ contract DeployLendingVault is Script {
 
         vm.startBroadcast(deployer);
 
-        SunToken claimToken = SunToken(vm.envOr("SUN_TOKEN_ADDRESS", address(0)));
-        if (address(claimToken) == address(0)) {
-            claimToken = new SunToken(vm.envString("BASE_URI"));
-            console.log("SunToken:", address(claimToken));
-        }
+        SunToken claimToken = SunToken(vm.envAddress("SUN_TOKEN_ADDRESS"));
 
         LendingVault vault = new LendingVault(
             LendingVault.Config({

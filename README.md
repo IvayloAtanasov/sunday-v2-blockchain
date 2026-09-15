@@ -65,7 +65,7 @@ $ ./deploy.sh arc-testnet DeployLendingVault --broadcast --verify   # send trans
 Scripts:
 
 -   `DeploySunToken`: deploys the SunToken collection. Needs `DEPLOYER_PRIVATE_KEY`.
--   `DeployLendingVault`: deploys a lending vault and binds it to its claim token id. Deploys a new SunToken unless `SUN_TOKEN_ADDRESS` is set.
+-   `DeployLendingVault`: deploys a lending vault and binds it to its claim token id. Requires an existing SunToken collection in `SUN_TOKEN_ADDRESS` (deploy it first with `DeploySunToken`).
 -   `DeployChainlinkYieldAdapter`: deploys the adapter and, if `LENDING_VAULT_ADDRESS` is set, wires it to that vault (only while funding is open).
 
 See the `.env.*.example` files for all variables and defaults.
