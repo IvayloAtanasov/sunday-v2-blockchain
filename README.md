@@ -47,9 +47,30 @@ $ anvil
 
 ### Deploy
 
+Each network has its own env file: `.env.arc` (Arc mainnet) and `.env.arc-testnet` (Arc testnet). They hold the RPC URL, deployer key and addresses, and are gitignored. Create them from the committed templates:
+
 ```shell
-$ forge script script/Counter.s.sol:CounterScript --rpc-url <your_rpc_url> --private-key <your_private_key>
+$ cp .env.arc-testnet.example .env.arc-testnet
+$ cp .env.arc.example .env.arc
 ```
+
+Then deploy with `./deploy.sh <network> <Script> [forge args]`, which loads `.env.<network>` and runs `script/<Script>.s.sol`:
+
+```shell
+$ ./deploy.sh arc-testnet DeployLendingVault               # simulate
+$ ./deploy.sh arc-testnet DeployLendingVault --broadcast   # send transactions
+$ ./deploy.sh arc DeploySunToken --broadcast --verify
+```
+
+Scripts:
+
+-   `DeploySunToken`: deploys the SunToken collection. Needs `DEPLOYER_PRIVATE_KEY`.
+-   `DeployLendingVault`: deploys a lending vault and binds it to its claim token id. Deploys a new SunToken unless `SUN_TOKEN` is set.
+-   `DeployChainlinkYieldAdapter`: deploys the adapter and, if `LENDING_VAULT` is set, wires it to that vault (only while funding is open).
+
+See the `.env.*.example` files for all variables and defaults.
+
+Don't keep a plain `.env` in this folder: Foundry loads it automatically and it fills in any variable the network file leaves unset.
 
 ### Cast
 
