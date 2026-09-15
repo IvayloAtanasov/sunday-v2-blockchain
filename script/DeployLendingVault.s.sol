@@ -19,7 +19,7 @@ contract DeployLendingVault is Script {
         address operator = vm.addr(deployer);
 
         address collateralToken = vm.envAddress("COLLATERAL_TOKEN_ADDRESS"); // EURC
-        address client = vm.envAddress("CLIENT_ADDRESS");
+        address borrower = vm.envAddress("BORROWER_ADDRESS");
         address activator = vm.envOr("ACTIVATOR_ADDRESS", operator);
         uint256 tokenId = vm.envUint("TOKEN_ID");
         uint256 principal = vm.envUint("PRINCIPAL");
@@ -38,7 +38,7 @@ contract DeployLendingVault is Script {
 
         LendingVault vault = new LendingVault(
             LendingVault.Config({
-                client: client,
+                borrower: borrower,
                 activator: activator,
                 claimToken: address(claimToken),
                 tokenId: tokenId,

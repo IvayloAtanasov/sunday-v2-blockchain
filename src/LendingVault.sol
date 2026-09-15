@@ -10,9 +10,9 @@ import { ISunToken } from "./interfaces/ISunToken.sol";
 /**
  * Zero-coupon bond with a performance-based premium, against a single real-world asset.
  *
- * Lenders subscribe EURC 1:1 for claim tokens. The client draws the principal down, builds the
+ * Lenders subscribe EURC 1:1 for claim tokens. The borrower draws the principal down, builds the
  * asset, and once it is live the term starts. Measured profit is pushed on-chain by the oracle
- * adapter and accrues as premium. The client repays principal + premium in one payment at
+ * adapter and accrues as premium. The borrower repays principal + premium in one payment at
  * maturity; lenders then burn claim tokens to redeem.
  *
  * The obligation is unsecured: the principal becomes physical hardware that cannot be escrowed.
@@ -35,7 +35,7 @@ contract LendingVault is Owned, ReentrancyGuard {
     }
 
     struct Config {
-        address client;
+        address borrower;
         address activator;
         address claimToken;
         uint256 tokenId;
@@ -56,7 +56,7 @@ contract LendingVault is Owned, ReentrancyGuard {
     uint256 internal constant BPS = 10_000;
 
     /// Address that draws the principal down and owes repayment
-    address public immutable client;
+    address public immutable borrower;
 
     /// Address that attests the asset is live (spec §10.1 — resolved at deployment)
     address public immutable activator;
@@ -103,7 +103,7 @@ contract LendingVault is Owned, ReentrancyGuard {
     /// min(owed, pot) snapshotted by finalize(); the pot redemptions are paid from (R-15)
     uint256 public settled;
 
-    /// Client overpayment, withdrawable after finalize (R-32)
+    /// Borrower overpayment, withdrawable after finalize (R-32)
     uint256 public surplus;
 
     uint256 public activatedAt;
@@ -150,7 +150,7 @@ contract LendingVault is Owned, ReentrancyGuard {
     error WrongPhase(Phase expected, Phase actual);
     error ZeroAmount();
     error ExceedsTarget(uint256 remaining);
-    error NotClient();
+    error NotBorrower();
     error NotActivator();
     error NotAdapter();
     error AlreadyDrawnDown();
@@ -174,12 +174,12 @@ contract LendingVault is Owned, ReentrancyGuard {
     constructor(Config memory c, address operator) Owned(operator) {
         if (
             c.principal == 0 || c.term == 0 || c.fundingWindow == 0 || c.activationWindow == 0
-                || c.client == address(0) || c.activator == address(0) || c.claimToken == address(0)
+                || c.borrower == address(0) || c.activator == address(0) || c.claimToken == address(0)
                 || c.collateralToken == address(0)
                 || c.maxRebaseDeltaRatio == 0 || c.maxRebaseDeltaRatio > BPS
         ) revert InvalidConfig();
 
-        client = c.client;
+        borrower = c.borrower;
         activator = c.activator;
         claimToken = ISunToken(c.claimToken);
         tokenId = c.tokenId;
@@ -306,19 +306,19 @@ contract LendingVault is Owned, ReentrancyGuard {
     //////////////////////////////////////////////////////////////*/
 
     /**
-     * Client takes the principal to build the asset. Once, and exactly `principal`, never
+     * Borrower takes the principal to build the asset. Once, and exactly `principal`, never
      * whatever the balance happens to be (R-12).
      */
     function drawdown() external nonReentrant {
         _require(Phase.Drawdown);
-        if (msg.sender != client) revert NotClient();
+        if (msg.sender != borrower) revert NotBorrower();
         if (drawnDown) revert AlreadyDrawnDown();
 
         drawnDown = true;
 
-        collateralToken.safeTransfer(client, principal);
+        collateralToken.safeTransfer(borrower, principal);
 
-        emit DrawnDown(client, principal);
+        emit DrawnDown(borrower, principal);
     }
 
     /**
@@ -415,7 +415,7 @@ contract LendingVault is Owned, ReentrancyGuard {
         settled = o < pot ? o : pot;
         defaulted = settled < o;
 
-        // Only an overpaying client can leave a surplus, and only when lenders are whole (R-32)
+        // Only an overpaying borrower can leave a surplus, and only when lenders are whole (R-32)
         if (settled == o && repaid > o) surplus = repaid - o;
 
         _storedPhase = Phase.Redemption;
@@ -442,31 +442,31 @@ contract LendingVault is Owned, ReentrancyGuard {
     }
 
     /**
-     * Return an overpayment to the client. Never touches the lenders' pot (R-32).
+     * Return an overpayment to the borrower. Never touches the lenders' pot (R-32).
      */
     function withdrawSurplus() external nonReentrant {
         _require(Phase.Redemption);
-        if (msg.sender != client) revert NotClient();
+        if (msg.sender != borrower) revert NotBorrower();
 
         uint256 amount = surplus;
         if (amount == 0) revert ZeroAmount();
 
         surplus = 0;
 
-        collateralToken.safeTransfer(client, amount);
+        collateralToken.safeTransfer(borrower, amount);
 
-        emit SurplusWithdrawn(client, amount);
+        emit SurplusWithdrawn(borrower, amount);
     }
 
     /**
-     * Hand the client whatever EURC is left once every claim is gone: unwithdrawn surplus,
+     * Hand the borrower whatever EURC is left once every claim is gone: unwithdrawn surplus,
      * redemption dust, and EURC sent to the vault without subscribe() or repay(). Stray EURC
      * is never counted as repayment; lenders' claims are fully paid out before it moves (R-36).
      */
     function withdrawRemainder() external nonReentrant {
         Phase p = phase();
         if (p != Phase.Redemption && p != Phase.Failed) revert WrongPhase(Phase.Redemption, p);
-        if (msg.sender != client) revert NotClient();
+        if (msg.sender != borrower) revert NotBorrower();
         if (claimToken.totalSupply(tokenId) != 0) revert ClaimsOutstanding();
 
         uint256 amount = collateralToken.balanceOf(address(this));
@@ -474,9 +474,9 @@ contract LendingVault is Owned, ReentrancyGuard {
 
         surplus = 0;
 
-        collateralToken.safeTransfer(client, amount);
+        collateralToken.safeTransfer(borrower, amount);
 
-        emit RemainderWithdrawn(client, amount);
+        emit RemainderWithdrawn(borrower, amount);
     }
 
     /*//////////////////////////////////////////////////////////////

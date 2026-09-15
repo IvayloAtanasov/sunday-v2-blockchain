@@ -18,7 +18,7 @@ contract LendingVaultTest is Test {
     LendingVault vault;
 
     address operator = address(0xA0);
-    address client = address(0xC1);
+    address borrower = address(0xC1);
     address activator = address(0xAC);
     address adapter = address(0xAD);
     address alice = address(0xA1);
@@ -44,7 +44,7 @@ contract LendingVaultTest is Test {
         claim = new SunToken("ipfs://base");
 
         LendingVault.Config memory c = LendingVault.Config({
-            client: client,
+            borrower: borrower,
             activator: activator,
             claimToken: address(claim),
             tokenId: TOKEN_ID,
@@ -67,7 +67,7 @@ contract LendingVaultTest is Test {
 
         eurc.mint(alice, 1_000_000e6);
         eurc.mint(bob, 1_000_000e6);
-        eurc.mint(client, 1_000_000e6);
+        eurc.mint(borrower, 1_000_000e6);
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -82,7 +82,7 @@ contract LendingVaultTest is Test {
     }
 
     function _repay(uint256 amount) internal {
-        vm.startPrank(client);
+        vm.startPrank(borrower);
         eurc.approve(address(vault), amount);
         vault.repay(amount);
         vm.stopPrank();
@@ -93,7 +93,7 @@ contract LendingVaultTest is Test {
         _subscribe(alice, PRINCIPAL / 2);
         _subscribe(bob, PRINCIPAL / 2);
 
-        vm.prank(client);
+        vm.prank(borrower);
         vault.drawdown();
 
         vm.prank(activator);
@@ -113,7 +113,7 @@ contract LendingVaultTest is Test {
         _toAccruing();
 
         assertEq(uint256(vault.maturity()), block.timestamp + TERM, "I-12");
-        assertEq(eurc.balanceOf(client), 1_000_000e6 + PRINCIPAL, "drawdown paid out");
+        assertEq(eurc.balanceOf(borrower), 1_000_000e6 + PRINCIPAL, "drawdown paid out");
 
         // Accrue premium over the term
         uint256 premium;
@@ -217,7 +217,7 @@ contract LendingVaultTest is Test {
         vm.warp(block.timestamp + FUNDING_WINDOW);
         assertEq(uint256(vault.phase()), uint256(LendingVault.Phase.Failed));
 
-        vm.prank(client);
+        vm.prank(borrower);
         vm.expectRevert();
         vault.drawdown();
 
@@ -250,10 +250,10 @@ contract LendingVaultTest is Test {
         _subscribe(alice, PRINCIPAL / 2);
         _subscribe(bob, PRINCIPAL / 2);
 
-        vm.prank(client);
+        vm.prank(borrower);
         vault.drawdown();
 
-        vm.prank(client);
+        vm.prank(borrower);
         vm.expectRevert(LendingVault.AlreadyDrawnDown.selector);
         vault.drawdown();
 
@@ -263,18 +263,18 @@ contract LendingVaultTest is Test {
         _repay(5_000e6);
 
         // Past Drawdown there is no path back to the balance at all
-        vm.prank(client);
+        vm.prank(borrower);
         vm.expectRevert();
         vault.drawdown();
 
         assertEq(eurc.balanceOf(address(vault)), 5_000e6, "repayment stays put");
     }
 
-    function test_drawdown_onlyClient() public {
+    function test_drawdown_onlyBorrower() public {
         _subscribe(alice, PRINCIPAL);
 
         vm.prank(alice);
-        vm.expectRevert(LendingVault.NotClient.selector);
+        vm.expectRevert(LendingVault.NotBorrower.selector);
         vault.drawdown();
     }
 
@@ -286,7 +286,7 @@ contract LendingVaultTest is Test {
     function test_term_lengthIsFixed_startFloats() public {
         _subscribe(alice, PRINCIPAL);
 
-        vm.prank(client);
+        vm.prank(borrower);
         vault.drawdown();
 
         vm.warp(block.timestamp + 60 days); // slow build
@@ -301,10 +301,10 @@ contract LendingVaultTest is Test {
     function test_activate_onlyActivatorAndOnlyOnce() public {
         _subscribe(alice, PRINCIPAL);
 
-        vm.prank(client);
+        vm.prank(borrower);
         vault.drawdown();
 
-        vm.prank(client);
+        vm.prank(borrower);
         vm.expectRevert(LendingVault.NotActivator.selector);
         vault.activate();
 
@@ -316,7 +316,7 @@ contract LendingVaultTest is Test {
         vault.activate();
     }
 
-    /// R-35: activating before drawdown would lock the client out of the principal they owe.
+    /// R-35: activating before drawdown would lock the borrower out of the principal they owe.
     function test_activate_requiresDrawdown() public {
         _subscribe(alice, PRINCIPAL);
 
@@ -324,7 +324,7 @@ contract LendingVaultTest is Test {
         vm.expectRevert(LendingVault.NotDrawnDown.selector);
         vault.activate();
 
-        vm.prank(client);
+        vm.prank(borrower);
         vault.drawdown();
 
         vm.prank(activator);
@@ -340,7 +340,7 @@ contract LendingVaultTest is Test {
         vm.warp(block.timestamp + ACTIVATION_WINDOW + 1);
         assertEq(uint256(vault.phase()), uint256(LendingVault.Phase.Default));
 
-        // Client never drew down, so the subscription money is still here and belongs to lenders
+        // Borrower never drew down, so the subscription money is still here and belongs to lenders
         vault.finalize();
         assertEq(vault.settled(), PRINCIPAL, "undrawn principal recoverable");
 
@@ -353,7 +353,7 @@ contract LendingVaultTest is Test {
     function test_activationDeadline_missedAfterDrawdown_lendersGetNothing() public {
         _subscribe(alice, PRINCIPAL);
 
-        vm.prank(client);
+        vm.prank(borrower);
         vault.drawdown();
 
         vm.warp(block.timestamp + ACTIVATION_WINDOW + 1);
@@ -371,7 +371,7 @@ contract LendingVaultTest is Test {
         _toAccruing();
 
         vm.warp(block.timestamp + 30 days);
-        vm.prank(client);
+        vm.prank(borrower);
         vm.expectRevert(LendingVault.NotAdapter.selector);
         vault.rebase(10e6, uint64(block.timestamp - 1 days));
     }
@@ -422,7 +422,7 @@ contract LendingVaultTest is Test {
 
     function test_constructor_rejectsInvalidRebaseDeltaRatio() public {
         LendingVault.Config memory c = LendingVault.Config({
-            client: client,
+            borrower: borrower,
             activator: activator,
             claimToken: address(claim),
             tokenId: 2,
@@ -577,8 +577,8 @@ contract LendingVaultTest is Test {
                            SURPLUS & ADMIN
     //////////////////////////////////////////////////////////////*/
 
-    /// R-32: an overpaying client gets the excess back; lenders do not.
-    function test_surplus_returnsToClient() public {
+    /// R-32: an overpaying borrower gets the excess back; lenders do not.
+    function test_surplus_returnsToBorrower() public {
         _toAccruing();
 
         vm.warp(vault.maturity() + 1);
@@ -589,14 +589,14 @@ contract LendingVaultTest is Test {
         assertEq(vault.settled(), owed);
         assertEq(vault.surplus(), 500e6);
 
-        uint256 before = eurc.balanceOf(client);
-        vm.prank(client);
+        uint256 before = eurc.balanceOf(borrower);
+        vm.prank(borrower);
         vault.withdrawSurplus();
-        assertEq(eurc.balanceOf(client) - before, 500e6);
+        assertEq(eurc.balanceOf(borrower) - before, 500e6);
     }
 
-    /// R-36: stray EURC is not repayment; the client gets it back only once every claim is gone.
-    function test_remainder_strayEurcGoesToClientAfterAllRedeemed() public {
+    /// R-36: stray EURC is not repayment; the borrower gets it back only once every claim is gone.
+    function test_remainder_strayEurcGoesToBorrowerAfterAllRedeemed() public {
         _toAccruing();
 
         vm.warp(vault.maturity() + 1);
@@ -612,7 +612,7 @@ contract LendingVaultTest is Test {
         vm.prank(alice);
         vault.redeem(PRINCIPAL / 2);
 
-        vm.prank(client);
+        vm.prank(borrower);
         vm.expectRevert(LendingVault.ClaimsOutstanding.selector);
         vault.withdrawRemainder();
 
@@ -620,14 +620,14 @@ contract LendingVaultTest is Test {
         vault.redeem(PRINCIPAL / 2);
 
         vm.prank(alice);
-        vm.expectRevert(LendingVault.NotClient.selector);
+        vm.expectRevert(LendingVault.NotBorrower.selector);
         vault.withdrawRemainder();
 
-        uint256 before = eurc.balanceOf(client);
-        vm.prank(client);
+        uint256 before = eurc.balanceOf(borrower);
+        vm.prank(borrower);
         vault.withdrawRemainder();
 
-        assertEq(eurc.balanceOf(client) - before, 123e6);
+        assertEq(eurc.balanceOf(borrower) - before, 123e6);
         assertEq(eurc.balanceOf(address(vault)), 0);
     }
 
@@ -643,13 +643,13 @@ contract LendingVaultTest is Test {
         vm.prank(bob);
         vault.redeem(PRINCIPAL / 2);
 
-        vm.prank(client);
+        vm.prank(borrower);
         vault.withdrawRemainder();
 
         assertEq(vault.surplus(), 0);
         assertEq(eurc.balanceOf(address(vault)), 0);
 
-        vm.prank(client);
+        vm.prank(borrower);
         vm.expectRevert(LendingVault.ZeroAmount.selector);
         vault.withdrawSurplus();
     }
@@ -662,14 +662,14 @@ contract LendingVaultTest is Test {
 
         vm.warp(vault.fundingDeadline());
 
-        vm.prank(client);
+        vm.prank(borrower);
         vm.expectRevert(LendingVault.ClaimsOutstanding.selector);
         vault.withdrawRemainder();
 
         vm.prank(alice);
         vault.refund(PRINCIPAL / 2);
 
-        vm.prank(client);
+        vm.prank(borrower);
         vault.withdrawRemainder();
 
         assertEq(eurc.balanceOf(address(vault)), 0);
@@ -678,7 +678,7 @@ contract LendingVaultTest is Test {
     function test_remainder_notBeforeTerminalPhase() public {
         _subscribe(alice, PRINCIPAL / 2);
 
-        vm.prank(client);
+        vm.prank(borrower);
         vm.expectRevert(
             abi.encodeWithSelector(
                 LendingVault.WrongPhase.selector, LendingVault.Phase.Redemption, LendingVault.Phase.Funding
@@ -701,7 +701,7 @@ contract LendingVaultTest is Test {
 
         // §2.1: the operator has no money-moving surface, even in the phase that has one
         vm.prank(operator);
-        vm.expectRevert(LendingVault.NotClient.selector);
+        vm.expectRevert(LendingVault.NotBorrower.selector);
         vault.drawdown();
     }
 
@@ -722,7 +722,7 @@ contract LendingVaultTest is Test {
 
     function test_claimToken_secondVaultGetsItsOwnId() public {
         LendingVault.Config memory c = LendingVault.Config({
-            client: client,
+            borrower: borrower,
             activator: activator,
             claimToken: address(claim),
             tokenId: 2,
@@ -762,7 +762,7 @@ contract LendingVaultTest is Test {
         _subscribe(alice, split);
         _subscribe(bob, PRINCIPAL - split);
 
-        vm.prank(client);
+        vm.prank(borrower);
         vault.drawdown();
         vm.prank(activator);
         vault.activate();

@@ -14,9 +14,9 @@ referenced from the invariants and open-decision lists.
 
 **1.2** Lenders subscribe EURC during a funding window and receive ERC1155 claim tokens at a fixed **1:1** ratio to principal. The ratio is 1:1 at issuance and never changes; the *value* of a token changes, its count does not.
 
-**1.3** The client draws the raised principal down and builds the asset. Once the asset is live, profit is measured off-chain and pushed on-chain, growing the total owed. That growth is the **premium**.
+**1.3** The borrower draws the raised principal down and builds the asset. Once the asset is live, profit is measured off-chain and pushed on-chain, growing the total owed. That growth is the **premium**.
 
-**1.4** The client repays **principal + premium in a single bullet payment at maturity**. There are no coupons and no amortisation schedule.
+**1.4** The borrower repays **principal + premium in a single bullet payment at maturity**. There are no coupons and no amortisation schedule.
 
 **1.5** There is **no early redemption**. A lender wanting out before maturity sells the ERC1155 on a secondary market, as with any bond.
 
@@ -28,7 +28,7 @@ referenced from the invariants and open-decision lists.
 
 | Actor | Role | Trust assumption |
 |---|---|---|
-| **Client** (issuer/borrower) | Proposes the project, draws down principal, builds and operates the asset, repays at maturity | Untrusted with contract state; trusted off-chain for repayment |
+| **Borrower** (issuer) | Proposes the project, draws down principal, builds and operates the asset, repays at maturity | Untrusted with contract state; trusted off-chain for repayment |
 | **Lender** (subscriber/holder) | Deposits EURC during funding, holds or trades the claim token, redeems after maturity | Untrusted |
 | **Operator** (Sunday) | Deploys vaults, configures the oracle adapter, attests to asset go-live | Trusted for attestation only — see [§10.1](#101-who-calls-activate) |
 | **Oracle adapter** | Chainlink Functions consumer that pushes measured profit into `rebase()` | Trusted for the profit figure; bounded by [§8](#8-oracle-and-rebase-rules) |
@@ -91,13 +91,13 @@ to enter them.
 
 **4.2 Failed.** Terminal. Callable: `refund()` — burn claim tokens, receive EURC 1:1. No premium, no loss. Once all claims are refunded, `withdrawRemainder()` (R-36); nothing else.
 
-**4.3 Drawdown.** Entry: funding target met. Callable: `drawdown()` (client, once, capped), `activate()`. Not callable: `rebase()`, `redeem()`. The asset does not exist yet, so no premium can accrue. Exits on `activate()` → **Accruing**, or on `activationDeadline` → **Default**.
+**4.3 Drawdown.** Entry: funding target met. Callable: `drawdown()` (borrower, once, capped), `activate()`. Not callable: `rebase()`, `redeem()`. The asset does not exist yet, so no premium can accrue. Exits on `activate()` → **Accruing**, or on `activationDeadline` → **Default**.
 
-**4.3.1 — R-35.** `activate()` MUST require that `drawdown()` has happened. `drawdown()` is only callable in Drawdown, so activating first would lock the client out of the principal while the term starts and the obligation accrues against them.
+**4.3.1 — R-35.** `activate()` MUST require that `drawdown()` has happened. `drawdown()` is only callable in Drawdown, so activating first would lock the borrower out of the principal while the term starts and the obligation accrues against them.
 
 **4.4 Accruing.** Entry: `activate()`, which sets `maturity = block.timestamp + term`. Callable: `rebase()`, `repay()`, and `finalize()` once `repaid >= owed` (R-16). Not callable: `subscribe()`, `drawdown()`, `redeem()`. Exits on `maturity` → **Settlement**, or early `finalize()` → **Redemption**.
 
-**4.5 Settlement.** Entry: `maturity` reached. `owed` is frozen. Callable: `repay()`, `finalize()`. This is the grace window in which the client's bullet payment must land. Exits on `finalize()` → **Redemption**, or on `maturity + grace` with `repaid < owed` → **Default**.
+**4.5 Settlement.** Entry: `maturity` reached. `owed` is frozen. Callable: `repay()`, `finalize()`. This is the grace window in which the borrower's bullet payment must land. Exits on `finalize()` → **Redemption**, or on `maturity + grace` with `repaid < owed` → **Default**.
 
 **4.6 Redemption.** Entry: `finalize()`, which fixes `settled`, from Accruing, Settlement or Default. Callable: `redeem()`, `withdrawSurplus()`, `withdrawRemainder()`. Terminal. Whether the loan defaulted is recorded in `defaulted`, not in the phase.
 
@@ -105,7 +105,7 @@ to enter them.
 
 **4.8 — R-6.** Every state transition MUST emit an event carrying the new state and the values frozen at that point (`owed`, `maturity`, `settled` as applicable).
 
-**4.9 — R-7.** Phase transitions that depend on a deadline MUST be reachable by anyone, not only by the Operator or the client. A vault MUST NOT be able to stall because a privileged party declines to call a function.
+**4.9 — R-7.** Phase transitions that depend on a deadline MUST be reachable by anyone, not only by the Operator or the borrower. A vault MUST NOT be able to stall because a privileged party declines to call a function.
 
 ---
 
@@ -116,7 +116,7 @@ except the rebase adapter, which freezes when funding closes (R-19).
 
 | Parameter | Meaning |
 |---|---|
-| `client` | Address that may call `drawdown()` and is obliged to repay |
+| `borrower` | Address that may call `drawdown()` and is obliged to repay |
 | `claimToken`, `tokenId` | ERC1155 collection and the id representing this vault's claim |
 | `collateralToken` | EURC; its `decimals()` is read once and cached (R-1) |
 | `principal` | Funding target |
@@ -167,7 +167,7 @@ the floor. Accumulating signed and flooring once lets a weak period offset later
 principal stays protected.
 
 **5.5 — R-12.** `drawdown()` MUST transfer exactly `principal` and be callable exactly once. It
-MUST NOT derive the amount from `balanceOf(address(this))`. The client receives exactly what was
+MUST NOT derive the amount from `balanceOf(address(this))`. The borrower receives exactly what was
 raised, no more and no less, so the transfer is fully determined by the contract's own rules rather
 than by whatever the balance happens to hold.
 
@@ -204,12 +204,12 @@ minor unit (R-2), so both sides are in the same units.
 
 **6.4.2 — R-31.** Division rounds down. Dust stays in the vault until R-36; the last redeemer is never short.
 
-**6.4.3 — R-32.** Surplus (`repaid - owed`) is refundable to the client, not payable to lenders.
+**6.4.3 — R-32.** Surplus (`repaid - owed`) is refundable to the borrower, not payable to lenders.
 
 **6.4.4 — R-36.** EURC sent to the vault other than through `subscribe()` or `repay()` MUST NOT be
 counted as subscription or repayment, and MUST NOT change `settled`. It is treated as a gift to the
-client. Once the vault is terminal (Redemption or Failed) and the claim token supply for `tokenId`
-is zero — every lender has redeemed or been refunded — the client MAY withdraw the vault's entire
+borrower. Once the vault is terminal (Redemption or Failed) and the claim token supply for `tokenId`
+is zero — every lender has redeemed or been refunded — the borrower MAY withdraw the vault's entire
 remaining EURC balance: stray transfers, redemption dust, and any unwithdrawn surplus. While any
 claim token is outstanding this path is closed, so it can never compete with a lender.
 
@@ -229,14 +229,14 @@ Names are indicative; the phase gating and the argument/cap semantics are the no
 |---|---|---|---|
 | `subscribe(amount)` | anyone | Funding | Pulls EURC, mints claim tokens 1:1. Reverts past the target (R-17). |
 | `refund(n)` | holder | Failed | Burn n tokens, receive n EURC. |
-| `drawdown()` | client | Drawdown | Once, capped at `principal` (R-12). |
+| `drawdown()` | borrower | Drawdown | Once, capped at `principal` (R-12). |
 | `activate()` | see §10.1 | Drawdown | Requires prior `drawdown()` (R-35). Sets `maturity = now + term`. Once. |
 | `rebase(delta, updatedAt)` | adapter | Accruing | Accumulates into `cumulativeYield`. Bounded by §8. |
 | `repay(amount)` | anyone | Accruing, Settlement, Default | Pulls EURC, increments `repaid`. Prepayment allowed (R-18). |
 | `finalize()` | anyone | Accruing (fully repaid), Settlement, Default | Fixes `settled`, sets `defaulted`, moves to Redemption (R-15, R-16). |
 | `redeem(n)` | holder | Redemption | Burns n tokens, pays `(n * settled) / principal`. |
-| `withdrawSurplus()` | client | Redemption | Pays `surplus` (R-32). |
-| `withdrawRemainder()` | client | Redemption, Failed | Only at zero claim supply. Pays the whole remaining balance (R-36). |
+| `withdrawSurplus()` | borrower | Redemption | Pays `surplus` (R-32). |
+| `withdrawRemainder()` | borrower | Redemption, Failed | Only at zero claim supply. Pays the whole remaining balance (R-36). |
 | `setRebaseAdapter(a)` | Operator | Funding only | Frozen once funding closes (R-19). |
 
 **7.1 — R-17.** `subscribe()` MUST reject any amount that would push `subscribed` past `principal`,
@@ -244,7 +244,7 @@ rather than relying on the vault running out of pre-minted tokens. Over-funding 
 partial fills at the boundary must be explicit.
 
 **7.2 — R-18.** `repay()` MUST accept partial prepayment during Accruing. It costs nothing to allow,
-lets a client de-risk their own default, and shrinks the payment that must land in a single block.
+lets a borrower de-risk their own default, and shrinks the payment that must land in a single block.
 Prepayment MUST NOT unlock early redemption and MUST NOT be withdrawable.
 
 **7.3 — R-19.** The rebase adapter address MUST be frozen when funding closes. After lenders have
@@ -316,7 +316,7 @@ no claim tokens of its own (R-11).
 **I-10** In Failed, EURC out == EURC in, and no premium is ever payable.
 **I-11** Every EURC balance increase is attributable to `subscribe()` or `repay()`; a bare transfer
 to the vault address increases neither `subscribed` nor `repaid`, is not claimable by lenders, and
-is withdrawable by the client only under R-36.
+is withdrawable by the borrower only under R-36.
 **I-12** `term` never changes; `maturity == activatedAt + term` (R-29).
 **I-13** Sum of all `redeem()` payouts ≤ `settled`, with truncation dust retained (R-31).
 
@@ -331,20 +331,20 @@ and installation slip, and premium can only accrue against an asset that exists.
 is who attests to go-live, because that party controls when accrual starts, when it stops, and when
 payment is due.
 
-- **Client** — direct incentive to activate late: every day of delay is a day the asset produces
+- **Borrower** — direct incentive to activate late: every day of delay is a day the asset produces
   off-chain while the on-chain clock has not started.
 - **Operator** — lenders trust Sunday to attest to a physical fact. Plausible, given Sunday already
   controls the profit oracle, but it should be a stated trust assumption rather than an accident.
 - **Oracle** — first non-zero production reading activates automatically. Most faithful to "the
   asset is live", and reuses trust already extended to the adapter.
 
-Whichever is chosen, **R-28**: the activation deadline is mandatory. Without it a client can draw
+Whichever is chosen, **R-28**: the activation deadline is mandatory. Without it a borrower can draw
 the full principal at funding close, never activate, never accrue a premium, never owe a due date,
 and leave the vault inert forever with the money gone.
 
 ### 10.2 Late payment after `finalize()`
 
-`settled` is fixed at finalize ([§6.4](#6-redemption-and-the-shortfall-rule)). A defaulting client
+`settled` is fixed at finalize ([§6.4](#6-redemption-and-the-shortfall-rule)). A defaulting borrower
 might pay part at maturity and the rest weeks later. Three shapes:
 
 1. **Single finalize, late payment handled off-chain.** Simplest, race-free, transfer-safe, no
@@ -360,7 +360,7 @@ Option 1 unless late payment is expected to be common rather than exceptional.
 ### 10.3 Premium cap
 
 [§1.3](#1-instrument) lets the premium grow with measured profit, bounded only by the term. Whether
-the client's total obligation should also carry an explicit ceiling (an APR cap, or a maximum
+the borrower's total obligation should also carry an explicit ceiling (an APR cap, or a maximum
 multiple of principal) is unresolved. Freezing accrual at maturity caps the *duration* but not the
 *rate*.
 
