@@ -31,9 +31,16 @@ referenced from the invariants and open-decision lists.
 | **Borrower** (issuer) | Proposes the project, draws down principal, builds and operates the asset, repays at maturity | Untrusted with contract state; trusted off-chain for repayment |
 | **Lender** (subscriber/holder) | Deposits EURC during funding, holds or trades the claim token, redeems after maturity | Untrusted |
 | **Operator** (Sunday) | Deploys vaults, configures the oracle adapter, attests to asset go-live | Trusted for attestation only — see [§10.1](#101-who-calls-activate) |
-| **Oracle adapter** | Chainlink Functions consumer that pushes measured profit into `rebase()` | Trusted for the profit figure; bounded by [§8](#8-oracle-and-rebase-rules) |
+| **Oracle adapter** (`YieldReceiver`) | Chainlink CRE receiver that pushes measured profit into `rebase()` | Trusted for the profit figure; bounded by [§8](#8-oracle-and-rebase-rules) |
 
 **2.1** The Operator must not be able to move funds, alter `owed`, or change the repayment obligation. Its powers are limited to configuration before funding opens and the attestation in [§10.1](#101-who-calls-activate).
+
+**2.2** The adapter is trusted for the figure, not for the formula. Under Chainlink Functions the
+two were the same thing: the caller supplied the source with each request, so an Operator key could
+state any yield it liked. Under CRE the formula is a workflow whose hash the receiver pins once and
+cannot revise ([§8.8](#8-oracle-and-rebase-rules)), and the Operator holds no key that can reach
+`rebase()`. What remains trusted is the data the workflow reads — Sunday's own API — which CRE does
+not decentralise and this spec does not claim it does.
 
 ---
 
@@ -249,6 +256,10 @@ Prepayment MUST NOT unlock early redemption and MUST NOT be withdrawable.
 
 **7.3 — R-19.** The rebase adapter address MUST be frozen when funding closes. After lenders have
 committed capital, no party should be able to swap out the source of truth for what is owed to them.
+The adapter freezes its own side to match ([§8.8](#8-oracle-and-rebase-rules)): a vault's formula is
+fixed from the moment it is sold, from both directions. A vault deployed without an adapter can
+therefore never accrue, and one bound to the wrong adapter is unrecoverable — both are deployment
+errors that must be caught before funding opens, not afterwards.
 
 **7.4 — R-20.** All ERC20 movements MUST use `SafeTransferLib` or equivalent checked transfers.
 Discarding the `bool` return is latent today because EURC reverts, but the subscribe path is the
@@ -289,11 +300,24 @@ call, not per unit of time, so the same ratio is looser the more often the oracl
 **8.5 — R-27.** `rebase()` MUST reject a stale `updatedAt` beyond a configured window.
 
 **8.6** The adapter MUST verify the target vault before calling, rather than decoding a vault
-address out of the oracle response and trusting it. If vaults are deployed by a factory, the
-adapter checks factory membership; the vault independently enforces `msg.sender == adapter`.
+address out of the oracle response and trusting it. The adapter holds its own registry: a vault is
+bound to the PV station backing it in an owner-only call, once per vault and never revised, and a
+report naming an unregistered vault is discarded. The vault independently enforces
+`msg.sender == adapter`. Registration MUST require that the vault already names the adapter, since
+`setRebaseAdapter` is frozen at funding close (R-19) and a mis-bound vault could never be repaired.
 
-**8.7 — R-34.** The adapter MUST track requests individually. A single-slot "last request id" makes
-two overlapping requests silently lose a rebase.
+**8.7 — R-34.** A report MAY carry updates for many vaults. Each `rebase()` MUST be attempted
+independently, and one vault's rejection MUST NOT discard the others' updates — a rejection is
+normally R-24, R-25 or R-26 working as intended, not a fault. Failures MUST be emitted rather than
+reverted, so that a report is never left in a state where re-delivery would be attempted; the
+vault's period rules (R-25) are what make re-delivery harmless, and they must not be leaned on.
+
+**8.8 — R-37.** The adapter MUST accept reports from exactly one pinned workflow identity, set once
+and frozen, and MUST reject everything else including reports that are otherwise validly signed.
+An adapter whose identity is unset MUST accept nothing rather than accept anything. The consequence
+is accepted deliberately: correcting the formula, or following a Chainlink forwarder migration,
+requires a new adapter and therefore new vaults, and existing vaults keep the formula they were
+sold with for the length of their term.
 
 ---
 

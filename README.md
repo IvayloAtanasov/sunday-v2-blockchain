@@ -72,6 +72,14 @@ See the `.env.*.example` files for all variables and defaults.
 
 Don't keep a plain `.env` in this folder: Foundry loads it automatically and it fills in any variable the network file leaves unset.
 
+#### Full deployment order
+
+1. DeploySunToken → SUN_TOKEN_ADDRESS (once)
+2. DeployYieldReceiver → YIELD_RECEIVER_ADDRESS (once)
+3. cre workflow deploy, with that receiver address in the workflow config → WORKFLOW_ID
+4. SetWorkflowId (once, irreversible)
+5. DeployLendingVault, repeated per vault
+
 ### Cast
 
 ```shell
