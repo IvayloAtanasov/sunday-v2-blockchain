@@ -38,9 +38,9 @@ contract YieldReceiver is IReceiver, Owned {
         uint64 updatedAt;
     }
 
-    /// Everything the workflow needs to decide what to fetch, in one call (see `vaultStates`)
+    /// What the workflow needs about one vault to decide which days are missing
     struct VaultState {
-        address vault;
+        bool registered;
         string stationId;
         uint8 phase;
         uint64 lastRebasedAt;
@@ -135,27 +135,31 @@ contract YieldReceiver is IReceiver, Owned {
     }
 
     /**
-     * The whole registry, with each vault's phase and last reported period.
+     * One vault's station binding, phase and last reported period.
      *
-     * The workflow needs all four fields to decide which days are missing, and a CRE execution is
-     * metered on the calls it makes. Assembling them here turns one read per vault plus one read
-     * of the list into a single call, which is what keeps the run inside quota as vaults are added.
-     * Read-only and unauthenticated — it exposes nothing the vaults do not already expose.
+     * The workflow enumerates installations from the backend — the same list the indexer and the
+     * app use, so a missing installation fails visibly everywhere rather than only here — and then
+     * asks this for each one. Mongo says which vaults exist; this says what each one is. A wrong
+     * row there can cost a vault its day, but cannot misprice one: the station binding is read
+     * here, and `onReport` rejects anything unregistered.
+     *
+     * Never reverts for an unknown address. It is called with whatever the backend listed, and a
+     * revert inside a chain read would cost every other vault its run, so an unregistered vault
+     * comes back with `registered == false` and is skipped by the caller.
      */
-    function vaultStates() external view returns (VaultState[] memory states) {
-        uint256 n = _vaults.length;
-        states = new VaultState[](n);
+    function vaultState(address vault) external view returns (VaultState memory state) {
+        Registration storage registration = _registrations[vault];
 
-        for (uint256 i = 0; i < n; ++i) {
-            address vault = _vaults[i];
-
-            states[i] = VaultState({
-                vault: vault,
-                stationId: _registrations[vault].stationId,
-                phase: ILendingVault(vault).phase(),
-                lastRebasedAt: ILendingVault(vault).lastRebasedAt()
-            });
+        if (!registration.registered) {
+            return state;
         }
+
+        state = VaultState({
+            registered: true,
+            stationId: registration.stationId,
+            phase: ILendingVault(vault).phase(),
+            lastRebasedAt: ILendingVault(vault).lastRebasedAt()
+        });
     }
 
     function supportsInterface(bytes4 interfaceId) external pure returns (bool) {

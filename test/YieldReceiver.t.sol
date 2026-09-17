@@ -261,27 +261,41 @@ contract YieldReceiverTest is Test {
         vm.stopPrank();
     }
 
-    /// One read gives the workflow the list, the station bindings and the sync watermark.
-    function test_vaultStates_reportsPhaseAndWatermark() public {
+    /// Per vault: the station binding and the sync watermark the workflow prices against.
+    function test_vaultState_reportsPhaseAndWatermark() public {
         _toAccruing(vaultA);
 
         uint256 at = vaultA.activatedAt() + 1 days;
         vm.warp(at + 1 hours);
         _deliver(_one(address(vaultA), 5e6, at));
 
-        YieldReceiver.VaultState[] memory states = receiver.vaultStates();
+        YieldReceiver.VaultState memory a = receiver.vaultState(address(vaultA));
 
-        assertEq(states.length, 2);
-
-        assertEq(states[0].vault, address(vaultA));
-        assertEq(states[0].stationId, STATION_A);
-        assertEq(states[0].phase, uint8(LendingVault.Phase.Accruing));
-        assertEq(states[0].lastRebasedAt, uint64(at));
+        assertTrue(a.registered);
+        assertEq(a.stationId, STATION_A);
+        assertEq(a.phase, uint8(LendingVault.Phase.Accruing));
+        assertEq(a.lastRebasedAt, uint64(at));
 
         // Untouched and still in Funding, so the workflow knows to skip it
-        assertEq(states[1].vault, address(vaultB));
-        assertEq(states[1].phase, uint8(LendingVault.Phase.Funding));
-        assertEq(states[1].lastRebasedAt, 0);
+        YieldReceiver.VaultState memory b = receiver.vaultState(address(vaultB));
+
+        assertTrue(b.registered);
+        assertEq(b.stationId, STATION_B);
+        assertEq(b.phase, uint8(LendingVault.Phase.Funding));
+        assertEq(b.lastRebasedAt, 0);
+    }
+
+    /**
+     * The workflow asks for whatever the backend listed, so an address that was never registered
+     * has to come back as a skippable answer. A revert here would cost every other vault its run.
+     */
+    function test_vaultState_unknownVaultIsNotARevert() public view {
+        YieldReceiver.VaultState memory state = receiver.vaultState(stranger);
+
+        assertFalse(state.registered);
+        assertEq(state.stationId, "");
+        assertEq(state.phase, 0);
+        assertEq(state.lastRebasedAt, 0);
     }
 
     /*//////////////////////////////////////////////////////////////
