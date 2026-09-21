@@ -65,8 +65,9 @@ $ ./deploy.sh arc-testnet DeployLendingVault --broadcast --verify   # send trans
 Scripts:
 
 -   `DeploySunToken`: deploys the SunToken collection. Needs `DEPLOYER_PRIVATE_KEY`.
--   `DeployLendingVault`: deploys a lending vault and binds it to its claim token id. Requires an existing SunToken collection in `SUN_TOKEN_ADDRESS` (deploy it first with `DeploySunToken`).
--   `DeployChainlinkYieldAdapter`: deploys the adapter and, if `LENDING_VAULT_ADDRESS` is set, wires it to that vault (only while funding is open).
+-   `DeployEnergyPriceOracle`: deploys the shared price oracle. One per network, and every adapter pins its address, so replacing it means replacing every vault.
+-   `DeployYieldAdapter`: deploys the adapter that prices production and rebases vaults. Requires `PRICE_ORACLE_ADDRESS`. The yield formula lives in this contract as constants — read `src/YieldAdapter.sol` before deploying one.
+-   `DeployLendingVault`: deploys a lending vault, binds it to its claim token id, and registers it with the adapter. Requires an existing SunToken collection in `SUN_TOKEN_ADDRESS` and an adapter in `YIELD_ADAPTER_ADDRESS`.
 
 See the `.env.*.example` files for all variables and defaults.
 
@@ -74,11 +75,23 @@ Don't keep a plain `.env` in this folder: Foundry loads it automatically and it 
 
 #### Full deployment order
 
-1. DeploySunToken → SUN_TOKEN_ADDRESS (once)
-2. DeployYieldReceiver → YIELD_RECEIVER_ADDRESS (once)
-3. cre workflow deploy, with that receiver address in the workflow config → WORKFLOW_ID
-4. SetWorkflowId (once, irreversible)
-5. DeployLendingVault, repeated per vault
+1. `DeploySunToken` → `SUN_TOKEN_ADDRESS` (once)
+2. `DeployEnergyPriceOracle` → `PRICE_ORACLE_ADDRESS` (once)
+3. `DeployYieldAdapter` → `YIELD_ADAPTER_ADDRESS` (once per formula)
+4. `DeployLendingVault`, repeated per vault
+
+Both the oracle and the adapter can be deployed without a publisher address. They accept nothing
+until `setPublisher` is called, so that is the safe order when the lambda keys do not exist yet.
+
+What is frozen, and what is not:
+
+| | Frozen | Why |
+|---|---|---|
+| The formula and its rates | yes, per adapter | It is what a lender was sold. Correcting it needs a new adapter, and therefore new vaults |
+| The price oracle address | yes, per adapter | A settable price source is a settable source of truth for what a vault owes |
+| A vault's station, market and capacity | yes, per vault | A settable ceiling would not bound the operator |
+| The publisher keys | **no**, rotatable by the owner | Losing a key must not permanently stop every vault accruing |
+| The price sanity bound | **no**, settable by the owner | A fixed ceiling on an unbounded quantity would cost every vault any period whose real price exceeded it |
 
 ### Cast
 

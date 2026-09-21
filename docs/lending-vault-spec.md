@@ -31,16 +31,36 @@ referenced from the invariants and open-decision lists.
 | **Borrower** (issuer) | Proposes the project, draws down principal, builds and operates the asset, repays at maturity | Untrusted with contract state; trusted off-chain for repayment |
 | **Lender** (subscriber/holder) | Deposits EURC during funding, holds or trades the claim token, redeems after maturity | Untrusted |
 | **Operator** (Sunday) | Deploys vaults, configures the oracle adapter, attests to asset go-live | Trusted for attestation only — see [§10.1](#101-who-calls-activate) |
-| **Oracle adapter** (`YieldReceiver`) | Chainlink CRE receiver that pushes measured profit into `rebase()` | Trusted for the profit figure; bounded by [§8](#8-oracle-and-rebase-rules) |
+| **Price oracle** (`EnergyPriceOracle`) | Holds the realized market price for each settlement period, written once per market-period | Trusted for the price; bounded only by a sanity guard — see [§2.2](#2-actors) |
+| **Yield oracle adapter** (`YieldAdapter`) | Computes the premium on-chain from a published price and a submitted production reading, and pushes it into `rebase()` | Trusted for the production reading; bounded by [§8](#8-oracle-and-rebase-rules) |
 
 **2.1** The Operator must not be able to move funds, alter `owed`, or change the repayment obligation. Its powers are limited to configuration before funding opens and the attestation in [§10.1](#101-who-calls-activate).
 
-**2.2** The adapter is trusted for the figure, not for the formula. Under Chainlink Functions the
-two were the same thing: the caller supplied the source with each request, so an Operator key could
-state any yield it liked. Under CRE the formula is a workflow whose hash the receiver pins once and
-cannot revise ([§8.8](#8-oracle-and-rebase-rules)), and the Operator holds no key that can reach
-`rebase()`. What remains trusted is the data the workflow reads — Sunday's own API — which CRE does
-not decentralise and this spec does not claim it does.
+**2.2** The adapter is trusted for **neither the figure nor the formula — only for the inputs**.
+
+Under Chainlink Functions the figure and the formula were the same thing: the caller supplied the
+source with each request, so an Operator key could state any yield it liked. The replacement moves
+the formula on-chain, into `YieldAdapter` as constants that cannot be revised
+([§8.8](#8-oracle-and-rebase-rules)). A lender reads the arithmetic that moves their claim rather
+than trusting that some off-chain code implements what it says, and can recompute any past rebase
+from the inputs its event carries. No key reaches `rebase()` with a number of its own.
+
+What is still trusted, stated plainly:
+
+- **The production reading.** It comes from the installation's inverter, which nothing here
+  decentralises. It is bounded per vault by a physical ceiling fixed at registration
+  ([§8.9](#8-oracle-and-rebase-rules)), so a wrong reading is capped in the unit it is wrong in —
+  but within that ceiling it is taken on faith.
+- **The price.** The market gives no ceiling, so the sanity bound on a published price catches a
+  mis-parsed number, not a chosen one: whoever holds the publishing key can publish just under it.
+  The price is also **systemic** in a way production is not — a wrong production reading moves one
+  vault, a wrong price moves every vault settling in that market on the same period. Both feeds are
+  single-sourced; cross-checking a price against a second independent source would bound this
+  properly and is not yet done.
+
+The Operator's remaining powers are configuration: registering vaults, rotating the publisher keys,
+and adjusting the price sanity bound. None of them can state a yield, and the first two cannot be
+exercised against a vault whose funding has closed.
 
 ---
 
@@ -300,11 +320,15 @@ call, not per unit of time, so the same ratio is looser the more often the oracl
 **8.5 — R-27.** `rebase()` MUST reject a stale `updatedAt` beyond a configured window.
 
 **8.6** The adapter MUST verify the target vault before calling, rather than decoding a vault
-address out of the oracle response and trusting it. The adapter holds its own registry: a vault is
+address out of the submitted payload and trusting it. The adapter holds its own registry: a vault is
 bound to the PV station backing it in an owner-only call, once per vault and never revised, and a
-report naming an unregistered vault is discarded. The vault independently enforces
+submission naming an unregistered vault is discarded. The vault independently enforces
 `msg.sender == adapter`. Registration MUST require that the vault already names the adapter, since
 `setRebaseAdapter` is frozen at funding close (R-19) and a mis-bound vault could never be repaired.
+
+**8.6.1** The same rule applies to the price. A submission carries a production reading and a
+period, never a price: the adapter looks the price up from the market the vault was registered
+against. A submitted price would be a submitted yield in all but name.
 
 **8.7 — R-34.** A report MAY carry updates for many vaults. Each `rebase()` MUST be attempted
 independently, and one vault's rejection MUST NOT discard the others' updates — a rejection is
@@ -312,12 +336,40 @@ normally R-24, R-25 or R-26 working as intended, not a fault. Failures MUST be e
 reverted, so that a report is never left in a state where re-delivery would be attempted; the
 vault's period rules (R-25) are what make re-delivery harmless, and they must not be leaned on.
 
-**8.8 — R-37.** The adapter MUST accept reports from exactly one pinned workflow identity, set once
-and frozen, and MUST reject everything else including reports that are otherwise validly signed.
-An adapter whose identity is unset MUST accept nothing rather than accept anything. The consequence
-is accepted deliberately: correcting the formula, or following a Chainlink forwarder migration,
-requires a new adapter and therefore new vaults, and existing vaults keep the formula they were
-sold with for the length of their term.
+**8.8 — R-37.** The **formula** MUST be frozen per adapter, as constants in the adapter itself,
+together with the address of the price oracle it reads. Neither may be settable by any party. The
+consequence is accepted deliberately: correcting a rate requires a new adapter and therefore new
+vaults, and existing vaults keep the formula they were sold with for the length of their term.
+
+This replaces the earlier rule, which pinned a Chainlink workflow identity — a hash standing in for
+a formula nobody could read on-chain. Freezing the arithmetic itself is the stronger form of the
+same guarantee, and the weaker form is no longer available now that the computation is not
+Chainlink's to attest.
+
+**8.8.1 — R-39.** The **publisher key** MUST NOT be frozen. It is an owner-rotatable role on both
+the adapter and the price oracle. Freezing a formula protects lenders because the formula is what
+they were sold; freezing a key protects nobody, and would mean that a lost or leaked key
+permanently stops every vault bound to that adapter from accruing.
+
+**8.8.2** An adapter or price oracle whose publisher is unset MUST accept nothing rather than
+accept anything, so that one deployed but not yet configured is inert rather than open.
+
+**8.9 — R-38.** The adapter MUST bound a submitted production reading against a **per-vault
+physical ceiling**, fixed at registration and never revised, and MUST discard any reading above it.
+Production is the one input no party can verify independently, so it must be bounded in the unit it
+is wrong in rather than only downstream by R-26, which bounds the resulting money against principal
+and is far looser. A settable ceiling would not be a bound on the Operator at all.
+
+**8.10 — R-40.** A published price MUST be written once per market and period and never revised. A
+realized price for a finished period is final, and a vault already rebased against it cannot be
+un-rebased (R-25), so a revision would leave the chain disagreeing with itself — the premium
+reflecting one price and the oracle another.
+
+**8.11** Period keys are **period starts** in local time, and both feeds MUST agree on them
+exactly, since a production reading finds its price by equality on that single number. The
+contracts MUST treat a key as an opaque identifier and MUST NOT decompose it into a date; they may
+check only that it is plausibly a local midnight. The convention itself lives off-chain, in one
+place.
 
 ---
 
@@ -360,7 +412,9 @@ payment is due.
 - **Operator** — lenders trust Sunday to attest to a physical fact. Plausible, given Sunday already
   controls the profit oracle, but it should be a stated trust assumption rather than an accident.
 - **Oracle** — first non-zero production reading activates automatically. Most faithful to "the
-  asset is live", and reuses trust already extended to the adapter.
+  asset is live", and reuses trust already extended to the adapter. Cheaper to implement than it
+  was: production now arrives at the adapter as a raw reading rather than as a pre-computed figure,
+  so "non-zero production" is something the adapter can see directly.
 
 Whichever is chosen, **R-28**: the activation deadline is mandatory. Without it a borrower can draw
 the full principal at funding close, never activate, never accrue a premium, never owe a due date,
@@ -388,11 +442,15 @@ the borrower's total obligation should also carry an explicit ceiling (an APR ca
 multiple of principal) is unresolved. Freezing accrual at maturity caps the *duration* but not the
 *rate*.
 
-### 10.4 Commission and negative periods
+### 10.4 Platform fee and negative periods
 
-`SUNDAY_COMMISSION = 2` EUR/day is flat — roughly 730 EUR/yr against roughly 1,100 EUR/yr gross on a
-10k installation. The fee is most of the margin, and it is what pushes marginal days negative in the
-first place (the off-chain script applies corporate tax only when the result is positive, so a
-low-production day yields `revenue / 1.2 - 2 < 0`). R-9 and R-10 mean negative periods now only
-erode premium rather than principal, but the fee structure deserves revisiting independently of the
+`PLATFORM_FEE_MICRO` is EUR **1.25** per rebase, flat — roughly 456 EUR/yr against roughly 1,100
+EUR/yr gross on a 10k installation. It was EUR 2 under the retired off-chain formula; lowering it
+softened the problem below without changing its shape, which is why this section stays open.
+
+A flat fee is **regressive in installation size**: immaterial on a large installation, and most of
+the margin on a small one. It is also what pushes marginal periods negative in the first place —
+corporate tax applies only when the result is positive, so a low-production period yields
+`revenue / 1.2 - 1.25 < 0`. R-9 and R-10 mean negative periods only erode premium rather than
+principal, but the fee structure deserves revisiting independently of the
 contract.

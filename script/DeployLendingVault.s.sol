@@ -4,7 +4,7 @@ pragma solidity ^0.8.20;
 import "lib/forge-std/src/Script.sol";
 import { LendingVault } from "../src/LendingVault.sol";
 import { SunToken } from "../src/SunToken.sol";
-import { YieldReceiver } from "../src/YieldReceiver.sol";
+import { YieldAdapter } from "../src/YieldAdapter.sol";
 
 /**
  * Deploys one lending vault and binds it to its claim token id.
@@ -18,21 +18,28 @@ import { YieldReceiver } from "../src/YieldReceiver.sol";
  *
  * Order matters — createToken must land before funding opens, or subscribe() cannot mint.
  *
- * One YieldReceiver serves every vault, so YIELD_RECEIVER_ADDRESS is set once per network and this
- * script is re-run per vault with a new BORROWER_ADDRESS, STATION_ID, PRINCIPAL and TOKEN_URI.
+ * One YieldAdapter serves every vault, so YIELD_ADAPTER_ADDRESS is set once per network and this
+ * script is re-run per vault with a new BORROWER_ADDRESS, STATION_ID, PRINCIPAL, TOKEN_URI and
+ * MAX_PERIOD_MILLI_KWH.
  *
- * Both the receiver and the station are required, not optional. The vault binds to the receiver
- * before funding opens and can never be rebound (R-19), and the station binding on the receiver is
+ * None of the adapter, the station, the market or the capacity ceiling is optional. The vault binds
+ * to the adapter before funding opens and can never be rebound, and the bindings on the adapter are
  * equally final — so a vault deployed against the wrong one, or against none, has to be abandoned
  * rather than corrected.
+ *
+ * MAX_PERIOD_MILLI_KWH is the most the installation can physically produce in one reporting period,
+ * in kWh x 1e3. It is what bounds a wrong production reading, so it should be the installation's
+ * real ceiling with a little headroom, not a round number chosen for convenience.
  */
 contract DeployLendingVault is Script {
     function run() public {
         uint256 deployer = vm.envUint("DEPLOYER_PRIVATE_KEY");
         address operator = vm.addr(deployer);
 
-        address receiver = vm.envAddress("YIELD_RECEIVER_ADDRESS");
+        address adapter = vm.envAddress("YIELD_ADAPTER_ADDRESS");
         string memory stationId = vm.envString("STATION_ID");
+        bytes32 country = bytes32(bytes(vm.envOr("STATION_COUNTRY", string("BG"))));
+        uint64 maxPeriodMilliKwh = uint64(vm.envUint("MAX_PERIOD_MILLI_KWH"));
 
         SunToken claimToken = SunToken(vm.envAddress("SUN_TOKEN_ADDRESS"));
         uint256 tokenId = claimToken.nextTokenId();
@@ -42,13 +49,15 @@ contract DeployLendingVault is Script {
 
         LendingVault vault = new LendingVault(config, operator);
 
-        require(claimToken.createToken(address(vault)) == tokenId, "token id taken during deployment");
+        require(
+            claimToken.createToken(address(vault)) == tokenId, "token id taken during deployment"
+        );
         claimToken.setURI(tokenId, vm.envString("TOKEN_URI"));
 
-        // Adapter is settable only while funding is open (R-19), and the receiver refuses to
-        // register a vault that is not already pointing at it — so this order is the only one.
-        vault.setRebaseAdapter(receiver);
-        YieldReceiver(receiver).registerVault(address(vault), stationId);
+        // The adapter is settable only while funding is open, and it refuses to register a vault
+        // that is not already pointing at it — so this order is the only one that works.
+        vault.setRebaseAdapter(adapter);
+        YieldAdapter(adapter).registerVault(address(vault), stationId, country, maxPeriodMilliKwh);
 
         vm.stopBroadcast();
 
@@ -57,7 +66,8 @@ contract DeployLendingVault is Script {
         console.log("principal:", config.principal);
         console.log("fundingDeadline:", vault.fundingDeadline());
         console.log("station:", stationId);
-        console.log("receiver:", receiver);
+        console.log("maxPeriodMilliKwh:", maxPeriodMilliKwh);
+        console.log("adapter:", adapter);
     }
 
     /// Kept out of run(), which holds more locals than the stack allows once the config is inlined
